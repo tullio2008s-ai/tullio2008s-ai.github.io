@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light"><meta name="theme-color" content="#f5f7fb">
+<meta name="robots" content="noindex,nofollow">
+<title>Scadenziario SMART · Gestione scadenze</title>
+<meta name="description" content="Gestione privata delle scadenze personali e aziendali.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="styles.css">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="app.js" defer></script>
+</head>
+<body>
+<div id="app">
+<aside class="sidebar" id="sidebar">
+<a class="brand" href="#dashboard"><span class="brand-symbol">S<span class="brand-dot">.</span></span><span class="brand-name">SCADENZIARIO <strong>SMART</strong><small>CONTROLLO SCADENZE</small></span></a>
+<div class="nav-label">WORKSPACE</div>
+<nav class="navigation" aria-label="Navigazione principale">
+<button class="nav-link active" data-view="dashboard"><span class="nav-icon">◫</span> Panoramica</button>
+<button class="nav-link" data-view="scadenze"><span class="nav-icon">▤</span> Scadenze <span id="nav-count" class="nav-count">0</span></button>
+<button class="nav-link" data-view="rapporti"><span class="nav-icon">◎</span> Rapporti ricorrenti</button>
+<button class="nav-link" data-view="pagamenti"><span class="nav-icon">◈</span> Pagamenti</button>
+</nav>
+<div class="sidebar-bottom"><div class="nav-label">SISTEMA</div>
+<button class="nav-link" data-view="impostazioni"><span class="nav-icon">⚙</span> Impostazioni</button>
+<div class="connection-status"><span id="connection-dot" class="connection-dot"></span><span id="connection-label">Non connesso</span></div>
+<div class="sidebar-footnote">Dati riservati su Google Drive.<br>Nessun dato finanziario pubblicato su GitHub.</div></div>
+</aside>
+<main class="main">
+<header class="topbar">
+<button id="mobile-menu" class="icon-button mobile-menu" aria-label="Apri menu">☰</button>
+<div class="breadcrumb">WORKSPACE <span> / </span> <strong id="current-view-title">Panoramica</strong></div>
+<div class="top-actions"><span class="today" id="today-label"></span>
+<button id="refresh-btn" class="icon-button" title="Aggiorna dati" aria-label="Aggiorna dati">↻</button>
+<button id="new-f24-btn" class="btn btn-ghost">+ F24</button>
+<button id="new-btn" class="btn btn-primary">+ Nuova scadenza</button></div>
+</header>
+<div class="content">
+<div id="message" class="message" role="status" aria-live="polite" hidden></div>
+<section id="dashboard-view" class="view">
+<div class="page-heading"><div><div class="eyebrow">IL TUO CONTROLLO FINANZIARIO</div><h1>Le tue scadenze, <span>in ordine.</span></h1><p>Una vista chiara su ciò che devi pagare e su ciò che hai già gestito.</p></div><span id="sync-label" class="sync-label">Dati non caricati</span></div>
+<div id="alerts" class="alerts" hidden></div>
+<div class="kpi-grid">
+<article class="kpi"><span class="kpi-label">DA PAGARE · 30 GIORNI</span><strong id="kpi-30">—</strong><span class="kpi-detail">Importi confermati</span><span class="kpi-icon">↗</span></article>
+<article class="kpi"><span class="kpi-label">DA PAGARE · 90 GIORNI</span><strong id="kpi-90">—</strong><span class="kpi-detail">Importi confermati</span><span class="kpi-icon">▦</span></article>
+<article class="kpi kpi-overdue"><span class="kpi-label">SCADUTO E NON PAGATO</span><strong id="kpi-overdue">—</strong><span class="kpi-detail" id="kpi-overdue-sub">Importi confermati</span><span class="kpi-icon">!</span></article>
+<article class="kpi"><span class="kpi-label">SCADENZE SALDATE</span><strong id="kpi-paid">—</strong><span class="kpi-detail">Registrazioni pagate</span><span class="kpi-icon">✓</span></article>
+</div>
+<div class="dashboard-columns">
+<article class="panel"><div class="panel-head"><div><h2>Prossime scadenze</h2><p>Le voci da tenere sotto controllo</p></div><button class="text-button" data-go="scadenze">Vedi tutte →</button></div><div id="upcoming-list" class="upcoming-list"></div></article>
+<article class="panel"><div class="panel-head"><div><h2>Per soggetto</h2><p>Ripartizione degli importi entro 90 giorni</p></div></div><div id="subject-summary"></div><div class="dashboard-note">Gli importi sconosciuti o soltanto previsionali non entrano nei totali.</div></article>
+</div>
+</section>
+<section id="scadenze-view" class="view" hidden>
+<div class="page-heading"><div><div class="eyebrow">ARCHIVIO OPERATIVO</div><h1>Tutte le <span>scadenze.</span></h1><p>Filtra, aggiorna e registra i pagamenti.</p></div><button class="btn btn-outline" id="export-btn">Esporta CSV</button></div>
+<div class="panel filters">
+<div class="filter-grid">
+<label>Ricerca<input id="filter-search" type="search" placeholder="Ente, descrizione, contratto…"></label>
+<label>Soggetto<select id="filter-subject"><option value="">Tutti</option></select></label>
+<label>Categoria<select id="filter-category"><option value="">Tutte</option></select></label>
+<label>Stato<select id="filter-status"><option value="">Tutti</option><option>Scaduto</option><option>Urgente</option><option>In scadenza</option><option>Regolare</option><option>Pagato</option><option>Parziale</option><option>Da definire</option><option>Evento</option><option>Annullato</option><option>Sospeso</option></select></label>
+<label>Periodo<select id="filter-period"><option value="">Tutti</option><option value="7">Prossimi 7 giorni</option><option value="30">Prossimi 30 giorni</option><option value="90">Prossimi 90 giorni</option><option value="overdue">Già scadute</option></select></label>
+<label>Ordina<select id="filter-sort"><option value="date">Data ↑</option><option value="date-desc">Data ↓</option><option value="amount-desc">Importo ↓</option><option value="amount">Importo ↑</option><option value="category">Categoria</option></select></label>
+</div></div>
+<div class="panel table-panel"><div class="table-wrap"><table><thead><tr><th>SCADENZA</th><th>SOGGETTO</th><th>CATEGORIA</th><th>DATA</th><th>RESIDUO</th><th>STATO</th><th></th></tr></thead><tbody id="due-table"></tbody></table></div><div id="due-empty" class="empty" hidden>Nessuna scadenza corrisponde ai filtri.</div></div>
+</section>
+<section id="rapporti-view" class="view" hidden><div class="page-heading"><div><div class="eyebrow">ANAGRAFICA</div><h1>Rapporti <span>ricorrenti.</span></h1><p>Polizze, prestiti, mutui e altri rapporti già censiti. Le date mancanti non vengono inventate.</p></div></div><div id="relations-grid" class="relation-grid"></div></section>
+<section id="pagamenti-view" class="view" hidden><div class="page-heading"><div><div class="eyebrow">STORICO</div><h1>Pagamenti <span>registrati.</span></h1><p>Solo pagamenti confermati, non movimenti semplicemente mostrati in una fotografia.</p></div></div><div class="panel table-panel"><div class="table-wrap"><table><thead><tr><th>DATA</th><th>SCADENZA</th><th>IMPORTO</th><th>CONTO</th><th>NOTE</th></tr></thead><tbody id="payments-table"></tbody></table></div><div id="payments-empty" class="empty" hidden>Nessun pagamento ancora registrato.</div></div></section>
+<section id="impostazioni-view" class="view" hidden>
+<div class="page-heading"><div><div class="eyebrow">CONNESSIONE SICURA</div><h1>Impostazioni <span>Google.</span></h1><p>Configurazione una sola volta per ogni dispositivo.</p></div></div>
+<div class="panel settings-panel"><h2>Collegamento all'archivio</h2><p>Usiamo l'autenticazione Google: nessuna password o token viene pubblicato su GitHub.</p>
+<form id="settings-form">
+<label>Google OAuth Client ID<input id="client-id" type="text" autocomplete="off" spellcheck="false" placeholder="xxxxxxxx.apps.googleusercontent.com" required></label>
+<label>ID del Google Sheets ufficiale<input id="sheet-id" type="text" autocomplete="off" spellcheck="false" placeholder="ID del foglio, non il nome" required></label>
+<div class="settings-actions"><button type="submit" class="btn btn-primary">Salva configurazione</button><button type="button" id="connect-btn" class="btn btn-outline">Accedi con Google</button><button type="button" id="logout-btn" class="btn btn-ghost">Disconnetti</button></div>
+</form><p class="helper">Il Client ID OAuth non è una password. Non inserire mai Client Secret, password o chiavi API in questa pagina. Il token Google resta solo nella memoria della scheda aperta.</p>
+<div class="divider"></div><h3>Stato della connessione</h3><div id="setup-status" class="setup-status">Configurazione non ancora completata.</div>
+<p class="helper">L'app richiede il permesso Google Sheets di lettura e scrittura. I documenti su Drive mantengono i propri permessi.</p></div>
+</section>
+</div>
+</main>
+</div>
+<dialog id="entry-dialog" class="modal"><form id="entry-form" class="modal-body">
+<div class="modal-head"><div><div class="eyebrow">SCADENZIARIO SMART</div><h2 id="entry-title">Nuova scadenza</h2></div><button type="button" class="close-button" data-close="entry-dialog" aria-label="Chiudi">×</button></div>
+<div class="mode-switch" id="entry-modes"><button type="button" data-mode="standard" class="selected">Manuale</button><button type="button" data-mode="relation">Da rapporto</button><button type="button" data-mode="f24">F24</button></div>
+<div id="relation-field" hidden><label>Rapporto esistente<select id="entry-relation"><option value="">Seleziona rapporto…</option></select></label></div>
+<div id="standard-fields"><label>Categoria<select id="entry-category" required></select></label><label>Descrizione<input id="entry-description" type="text" maxlength="180" placeholder="Es. Assicurazione auto, rata mutuo"></label></div>
+<div class="form-grid"><label>Chi paga<select id="entry-subject" required></select></label><label>Scadenza<input id="entry-date" type="date" required></label><label>Importo da pagare (€)<input id="entry-amount" type="text" inputmode="decimal" placeholder="Es. 125,50"></label><label>Da quale conto bancario<select id="entry-bank"><option value="">Da definire</option></select></label></div>
+<div id="extra-fields"><label>Note (facoltative)<textarea id="entry-notes" rows="2" maxlength="700" placeholder="Informazioni utili"></textarea></label></div>
+<div class="modal-footer"><button type="button" class="btn btn-ghost" data-close="entry-dialog">Annulla</button><button type="submit" id="entry-save" class="btn btn-primary">Salva nell'archivio</button></div>
+</form></dialog>
+<dialog id="detail-dialog" class="modal"><div class="modal-body"><div class="modal-head"><div><div class="eyebrow">DETTAGLIO SCADENZA</div><h2 id="detail-title"></h2></div><button class="close-button" data-close="detail-dialog">×</button></div><div id="detail-content"></div><div class="modal-footer"><button id="cancel-due-btn" class="btn btn-ghost danger-text">Annulla scadenza</button><button id="edit-due-btn" class="btn btn-outline">Modifica</button><button id="pay-due-btn" class="btn btn-primary">Registra pagamento</button></div></div></dialog>
+<dialog id="pay-dialog" class="modal"><form id="pay-form" class="modal-body"><div class="modal-head"><div><div class="eyebrow">REGISTRAZIONE PAGAMENTO</div><h2 id="pay-title">Conferma pagamento</h2></div><button type="button" class="close-button" data-close="pay-dialog">×</button></div><div class="form-grid"><label>Data effettiva<input id="pay-date" type="date" required></label><label>Importo pagato (€)<input id="pay-amount" type="text" inputmode="decimal" required></label><label>Conto effettivamente addebitato<select id="pay-bank"><option value="">Non specificato</option></select></label></div><label>Note (facoltative)<textarea id="pay-notes" rows="2" maxlength="500"></textarea></label><div class="modal-footer"><button type="button" class="btn btn-ghost" data-close="pay-dialog">Annulla</button><button type="submit" id="pay-save" class="btn btn-primary">Conferma pagamento</button></div></form></dialog>
+</body>
+</html>
