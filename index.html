@@ -28,7 +28,11 @@ svg.i{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.9;stro
 .hide{display:none!important}
 .sbtn{display:inline-flex;align-items:center;gap:6px;border:0;border-radius:8px;padding:6px 10px;font-size:12px;font-weight:800;white-space:nowrap;cursor:pointer;margin-top:6px}
 .sbtn.r{background:var(--bad);color:#fff}.sbtn.r:hover{filter:brightness(1.1)}
-.sbtn.y{background:#ffd23f;color:#3b2a00;cursor:default}
+.sbtn.y{background:#ffd23f;color:#3b2a00}.sbtn.y:hover{filter:brightness(1.06)}.sbtn.b{background:var(--brand);color:#fff}.sbtn.b:hover{filter:brightness(1.1)}
+.sec{font-size:12px;letter-spacing:.5px;text-transform:uppercase;color:var(--mut);margin:16px 0 4px;font-weight:800;display:flex;justify-content:space-between;gap:8px}.sec:first-child{margin-top:0}.sec span{background:var(--gray-soft);border-radius:999px;padding:1px 9px;letter-spacing:0}
+.car{display:inline-block;transition:.15s;color:var(--mut)}.car.o,.grp.open .car{transform:rotate(90deg)}
+.list li.sub{margin-left:18px;padding-left:12px;border-left:3px solid var(--line)}
+.grp td{background:var(--surface2)!important;cursor:pointer;font-weight:700}.grp:hover td{background:var(--brand-soft)!important}
 .tag{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:6px;background:#e8e1ff;color:#5b21b6;font-size:10.5px;font-weight:800;letter-spacing:.3px;vertical-align:middle}
 .row-r{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
 .mut{color:var(--mut)}
@@ -292,9 +296,10 @@ pre.out{background:var(--surface2);border:1px solid var(--line);border-radius:12
     <div><label>Scadenza abbonamento</label><input id="fScad" type="date"></div>
     <div><label>Rivenditore</label><input id="fRiv"></div>
     <div><label>Saluto nella mail (opz.)</label><input id="fSal" placeholder="Es. Mario"></div>
-    <div class="f1"><label>Gestione avvisi</label><select id="fGest"><option value="Automatica">Automatica – le mail partono da sole</option><option value="Manuale">Manuale – pagamento cumulativo (nessuna mail al cliente; allerta a te 10 giorni prima)</option></select></div>
+    <div class="f1"><label>Tipo di gestione</label><select id="fGest"><option value="Automatica">Singolo – avvisi automatici (le mail partono da sole)</option><option value="Manuale">Multiplo – gestione personalizzata (nessuna mail automatica; allerta a te 10 giorni prima)</option></select></div>
     <div class="f1"><label>Note</label><input id="fNote"></div>
   </div>
+  <div id="rinnBox" class="hide" style="margin-top:18px;padding:14px;border:1px dashed var(--line);border-radius:12px"><div class="mut" style="font-size:13px;margin-bottom:8px">Dopo aver aggiornato e <b>salvato</b> la nuova scadenza, invia al cliente la mail di ringraziamento e conferma rinnovo. Puoi reinviarla quando vuoi.</div><button class="sbtn b" id="fRinn" style="margin:0"></button></div>
   <div class="actions"><button class="btn ghost" data-close="mDev">Annulla</button><button class="btn ok" id="fSave">Salva</button></div>
 </div></div>
 
@@ -314,7 +319,7 @@ const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const ic=(n,c)=>`<svg class="i ${c||''}"><use href="#i-${n}"/></svg>`;
 let TOKEN=null; try{TOKEN=sessionStorage.getItem('gs_tok')}catch(e){}
-const S={me:null,today:'',devices:[],piani:[],test:true,giorni:[30,20,7,1],trigger:false,tab:'dash',filter:'all',q:'',sort:{k:'n',d:1},page:0,size:50,editing:null,settings:null,users:[],mailTest:'',allertaManuale:10,reinvio:7};
+const S={me:null,today:'',devices:[],piani:[],test:true,giorni:[30,20,7,1],trigger:false,tab:'dash',filter:'all',q:'',sort:{k:'n',d:1},page:0,size:50,editing:null,settings:null,users:[],mailTest:'',allertaManuale:10,reinvio:7,open:{}};
 
 const API_URL=window.__API_URL||'';
 function sessionLost(){TOKEN=null;try{sessionStorage.removeItem('gs_tok')}catch(x){};showLogin();return new Error('Sessione scaduta: accedi di nuovo.')}
@@ -392,19 +397,19 @@ const isDt=s=>/^\d{4}-\d{2}-\d{2}/.test(s||'');
 const lastSent=d=>[d.scadInv,d.ult].filter(isDt).sort().pop()||null;
 const recentSent=d=>{const l=lastSent(d);return l&&diff(S.today,l)<S.reinvio?l:null};
 function scadBtn(d){
-  if(d.stato!=='Scaduto'||noMail(d))return '';
+  if(d.stato!=='Scaduto'||noMail(d)||isMan(d))return '';
   const r=recentSent(d);
-  return r?`<button class="sbtn y" disabled title="Reinvio possibile dopo ${S.reinvio} giorni">${ic('ok')}Mail inviata il ${dmy(r).slice(0,5)}</button>`
+  return r?`<button class="sbtn y" data-sc="${esc(d.n)}" title="Clic per reinviare la mail">${ic('ok')}Mail inviata il ${dmy(r).slice(0,5)} ↻</button>`
           :`<button class="sbtn r" data-sc="${esc(d.n)}" title="Invia al cliente la mail di abbonamento scaduto">${ic('mail')}Invia mail abbonamento scaduto</button>`;
 }
 async function sendScaduto(n){
-  const d=S.devices.find(x=>x.n===n);
-  if(!confirm('Inviare la mail "abbonamento scaduto" a '+d.nome+' ('+d.mail+')?'+(S.test?'\n\n(MODALITÀ TEST: la mail va a '+S.mailTest+')':'')))return;
+  const d=S.devices.find(x=>x.n===n),r=recentSent(d);
+  if(!confirm((r?'La mail è già stata inviata il '+dmy(r)+'.\nVuoi reinviarla a ':'Inviare la mail "abbonamento scaduto" a ')+d.nome+' ('+d.mail+')?'+(S.test?'\n\n(MODALITÀ TEST: la mail va a '+S.mailTest+')':'')))return;
   try{S.devices=await api('api_sendScaduto',n);toast(S.test?'Mail di PROVA inviata a '+S.mailTest+' (non registrata: il pulsante resta rosso).':'Mail inviata al cliente.');refreshView()}catch(e){toast(e.message,true)}
 }
 function bindSc(root){$$((root||'')+' [data-sc]').forEach(b=>b.onclick=ev=>{ev.stopPropagation();sendScaduto(b.dataset.sc)})}
-function counts(){const c={all:S.devices.length,Attivo:0,Scaduto:0,Disattivo:0,Disdetto:0,sc30:0,nomail:0,man:0,manalert:0};
-  S.devices.forEach(d=>{c[d.stato]=(c[d.stato]||0)+1;if(isScad30(d))c.sc30++;if(isMan(d))c.man++;if(manAlert(d))c.manalert++;if(noMail(d)&&d.stato!=='Disdetto'&&d.stato!=='Disattivo')c.nomail++});return c}
+function counts(){const c={all:S.devices.length,Attivo:0,Scaduto:0,Disattivo:0,Disdetto:0,sc30:0,nomail:0,man:0,manalert:0,scs:0,scm:0};
+  S.devices.forEach(d=>{c[d.stato]=(c[d.stato]||0)+1;if(isScad30(d))c.sc30++;if(isMan(d))c.man++;if(d.stato==='Scaduto'){if(isMan(d))c.scm++;else c.scs++}if(manAlert(d))c.manalert++;if(noMail(d)&&d.stato!=='Disdetto'&&d.stato!=='Disattivo')c.nomail++});return c}
 
 /* dashboard */
 function renderDash(){
@@ -412,12 +417,18 @@ function renderDash(){
   const up=[];S.devices.forEach(d=>{if(d.stato!=='Attivo'||!d.scad||isMan(d))return;S.giorni.forEach((g,i)=>{
     const dt=addD(d.scad,-g),dd=diff(dt,S.today);if(dd>=0&&dd<=14&&!d.a[i])up.push({dt,d,g})})});
   up.sort((a,b)=>a.dt<b.dt?-1:1);
-  const items=[];
-  S.devices.filter(d=>d.stato==='Scaduto').forEach(d=>items.push(`<li class="click" data-open="${esc(d.n)}" title="Apri la scheda"><div class="who"><b>${esc(d.nome)}</b><small>#${esc(d.n)}${d.az?' · '+esc(d.az):''}${isMan(d)?' · gestione manuale':''}${noMail(d)?' · <span style="color:var(--bad);font-weight:700">mail mancante</span>':''}</small></div><div class="row-r"><span class="pill Scaduto">Scaduto</span>${scadBtn(d)}</div></li>`));
-  S.devices.filter(d=>noMail(d)&&d.stato==='Attivo').forEach(d=>items.push(`<li class="click" data-open="${esc(d.n)}" title="Apri la scheda"><div class="who"><b>${esc(d.nome)}</b><small>#${esc(d.n)}${d.az?' · '+esc(d.az):''}</small></div><span class="nomail">Mail mancante</span></li>`));
+  const liS=d=>`<li class="click" data-open="${esc(d.n)}" title="Apri la scheda"><div class="who"><b>${esc(d.nome)}</b><small>#${esc(d.n)}${d.az?' · '+esc(d.az):''}${noMail(d)?' · <span style="color:var(--bad);font-weight:700">mail mancante</span>':''}</small></div><div class="row-r"><span class="pill Scaduto">Scaduto</span>${scadBtn(d)}</div></li>`;
+  const sing=S.devices.filter(d=>d.stato==='Scaduto'&&!isMan(d));
+  const multi=S.devices.filter(d=>d.stato==='Scaduto'&&isMan(d));
+  const gm={};multi.forEach(d=>{const k=(d.az||d.nome).trim();(gm[k]=gm[k]||[]).push(d)});
+  const multiHtml=Object.keys(gm).sort().map(k=>{const L=gm[k].sort((a,b)=>dl(a)-dl(b));const op=!!S.open['d:'+k];
+    return `<li class="click gh" data-tg="${esc(k)}" title="Espandi / comprimi"><div class="who"><b><span class="car ${op?'o':''}">▸</span> ${esc(k)}</b><small>${L.length} dispositivo/i scaduti · gestione personalizzata</small></div><span class="pill Scaduto">${L.length}</span></li>`
+    +(op?L.map(d=>`<li class="click sub" data-open="${esc(d.n)}" title="Apri la scheda"><div class="who"><b>${esc(d.nome)}</b><small>#${esc(d.n)} · scaduto il ${dmy(d.scad)} (da ${-dl(d)} g)${noMail(d)?' · mail mancante':''}</small></div></li>`).join(''):'')}).join('');
+  const nm=S.devices.filter(d=>noMail(d)&&d.stato==='Attivo').map(d=>`<li class="click" data-open="${esc(d.n)}" title="Apri la scheda"><div class="who"><b>${esc(d.nome)}</b><small>#${esc(d.n)}${d.az?' · '+esc(d.az):''}</small></div><span class="nomail">Mail mancante</span></li>`);
   const grp={};S.devices.filter(manAlert).forEach(d=>{const k=(d.az||d.nome).trim();(grp[k]=grp[k]||[]).push(d)});
   const grpItems=Object.keys(grp).map(k=>{const L=grp[k].sort((a,b)=>dl(a)-dl(b));return `<li class="click" data-grp="${esc(k)}" title="Mostra i dispositivi"><div class="who"><b>${esc(k)}</b><small>${L.length} dispositivo/i · gestione manuale (pagamento cumulativo) · scade il ${dmy(L[0].scad)}</small></div><span class="days y">tra ${dl(L[0])} g</span></li>`});
-  const manage=grpItems.concat(items);
+  const sec=(t,n,h)=>h?`<div class="sec">${t} <span>${n}</span></div><ul class="list">${h}</ul>`:'';
+  const manageHtml=sec('Scaduti – dispositivi singoli',sing.length,sing.map(liS).join(''))+sec('Scaduti – dispositivi multipli (gestione personalizzata)',multi.length,multiHtml)+sec('Multipli in scadenza',grpItems.length,grpItems.join(''))+sec('Clienti senza mail',nm.length,nm.join(''));
   // grafico: scadenze dei prossimi 6 mesi
   const t=toD(S.today),months=[];for(let i=0;i<6;i++){const m=new Date(t.getFullYear(),t.getMonth()+i,1);months.push({y:m.getFullYear(),m:m.getMonth(),n:0})}
   S.devices.forEach(d=>{if(d.stato!=='Attivo'||!d.scad)return;const x=toD(d.scad);const mm=months.find(a=>a.y===x.getFullYear()&&a.m===x.getMonth());if(mm)mm.n++});
@@ -427,21 +438,23 @@ function renderDash(){
   <div class="kpis">
     ${K('Attivo','ok','g',c.Attivo,'Dispositivi attivi')}
     ${K('sc30','clock','y',c.sc30,'In scadenza entro 30 giorni')}
-    ${K('Scaduto','warn','r',c.Scaduto,'Scaduti')}
+    ${K('scs','warn','r',c.scs,'Scaduti – singoli')}
+    ${K('scm','warn','r',c.scm,'Scaduti – multipli')}
     ${K('nomail','mail','r',c.nomail,'Clienti senza mail')}
-    ${K('manalert','clock','y',c.manalert,'Gestione manuale in scadenza (≤'+S.allertaManuale+' gg)')}
+    ${K('manalert','clock','y',c.manalert,'Multipli in scadenza (≤'+S.allertaManuale+' gg)')}
     ${K('Disattivo','off','n',c.Disattivo+c.Disdetto,'Disattivi / disdetti')}
   </div>
   <div class="grid2">
     <div class="card pad"><h3>Scadenze dei prossimi 6 mesi <span class="mut" style="font-weight:500;font-size:13px">solo dispositivi attivi</span></h3>
       <div class="chart">${months.map(a=>`<div class="col"><b>${a.n}</b><div class="bar ${a.n?'':'z'}" style="height:${Math.max(4,a.n/mx*100)}%"></div><small>${MES[a.m]}</small></div>`).join('')}</div></div>
-    <div class="card pad"><h3>Da gestire <span class="hint">clicca sul nome per aprire la scheda</span></h3>${manage.length?`<ul class="list" style="max-height:460px;overflow:auto">${manage.join('')}</ul>`:'<div class="mut">Tutto in ordine.</div>'}</div>
+    <div class="card pad"><h3>Da gestire <span class="hint">clicca sul nome per aprire la scheda</span></h3>${manageHtml?`<div style="max-height:560px;overflow:auto">${manageHtml}</div>`:'<div class="mut">Tutto in ordine.</div>'}</div>
   </div>
   <div class="card pad" style="margin-top:14px"><h3>Prossimi avvisi (14 giorni)<span class="mut" style="font-weight:500;font-size:13px">${up.length} in programma</span></h3>
     ${up.length?`<ul class="list">${up.slice(0,10).map(x=>`<li class="click" data-open="${esc(x.d.n)}" title="Apri la scheda"><div class="who"><b>${esc(x.d.nome)}</b><small>#${esc(x.d.n)} · scade il ${dmy(x.d.scad)}</small></div><span class="mut" style="white-space:nowrap">${dmy(x.dt)} · avviso ${x.g}g</span></li>`).join('')}</ul>`:'<div class="mut">Nessun avviso nei prossimi 14 giorni.</div>'}</div>`;
   $$('#pDash .kpi').forEach(k=>k.onclick=()=>{S.filter=k.dataset.f;S.page=0;setTab('dev')});
   $$('#pDash [data-open]').forEach(li=>li.onclick=()=>openDev(li.dataset.open));
   $$('#pDash [data-grp]').forEach(li=>li.onclick=()=>{S.q=li.dataset.grp;$('#search').value=S.q;S.filter='manalert';S.page=0;setTab('dev')});
+  $$('#pDash [data-tg]').forEach(li=>li.onclick=()=>{const k='d:'+li.dataset.tg;S.open[k]=!S.open[k];renderDash()});
   bindSc('#pDash');
 }
 
@@ -452,6 +465,8 @@ function filtered(){
   let r=S.devices.filter(d=>{
     if(S.filter==='sc30'&&!isScad30(d))return false;
     if(S.filter==='man'&&!isMan(d))return false;
+    if(S.filter==='scs'&&!(d.stato==='Scaduto'&&!isMan(d)))return false;
+    if(S.filter==='scm'&&!(d.stato==='Scaduto'&&isMan(d)))return false;
     if(S.filter==='manalert'&&!manAlert(d))return false;
     if(S.filter==='nomail'&&!(noMail(d)&&d.stato!=='Disattivo'&&d.stato!=='Disdetto'))return false;
     if(['Attivo','Scaduto','Disattivo','Disdetto'].includes(S.filter)&&d.stato!==S.filter)return false;
@@ -464,34 +479,44 @@ function filtered(){
 }
 function renderDev(){
   const c=counts();
-  const ch=[['all','Tutti',c.all],['Attivo','Attivi',c.Attivo],['sc30','In scadenza',c.sc30],['Scaduto','Scaduti',c.Scaduto],['Disattivo','Disattivi',c.Disattivo],['Disdetto','Disdetti',c.Disdetto],['man','Manuali',c.man],['nomail','Senza mail',c.nomail]];
+  const ch=[['all','Tutti',c.all],['Attivo','Attivi',c.Attivo],['sc30','In scadenza',c.sc30],['scs','Scaduti singoli',c.scs],['scm','Scaduti multipli',c.scm],['Disattivo','Disattivi',c.Disattivo],['Disdetto','Disdetti',c.Disdetto],['man','Multipli',c.man],['nomail','Senza mail',c.nomail]];
   $('#chips').innerHTML=ch.map(([k,l,n])=>`<button class="chip ${S.filter===k?'on':''}" data-f="${k}">${l}<em>${n}</em></button>`).join('');
   $$('#chips .chip').forEach(b=>b.onclick=()=>{S.filter=b.dataset.f;S.page=0;renderDev()});
   $('#thead').innerHTML='<tr>'+COLS.map(([k,l])=>`<th data-k="${k}">${l}<span class="ar">${S.sort.k===k?(S.sort.d>0?'▲':'▼'):''}</span></th>`).join('')+'</tr>';
   $$('#thead th').forEach(th=>th.onclick=()=>{const k=th.dataset.k;if(k==='_')return;S.sort=S.sort.k===k?{k,d:-S.sort.d}:{k,d:1};renderDev()});
   const rows=filtered(),size=S.size,pages=Math.max(1,Math.ceil(rows.length/size));if(S.page>=pages)S.page=pages-1;
   const slice=rows.slice(S.page*size,S.page*size+size);
-  $('#tbody').innerHTML=slice.map(d=>{
+  const rowHtml=d=>{
     const n=dl(d);let chip='';
     if(d.scad&&d.stato!=='Disdetto'&&d.stato!=='Disattivo'){chip=n<0?`<span class="days r">scaduto da ${-n} g</span>`:n<=30?`<span class="days y">tra ${n} g</span>`:`<span class="days g">tra ${n} g</span>`}
     const cls=d.stato==='Scaduto'?'scaduto':(d.stato==='Disattivo'||d.stato==='Disdetto')?'off':'';
     return `<tr class="${cls}">
       <td class="mono">${esc(d.n)}</td>
-      <td><div class="cli"><div class="av">${esc(initials(d.nome))}</div><div style="min-width:0"><b title="${esc(d.nome)}">${esc(d.nome)}</b>${isMan(d)?'<span class="tag">MANUALE</span>':''}${d.az?`<small>${esc(d.az)}</small>`:`<small class="mono">${esc(d.id)}</small>`}</div></div></td>
+      <td><div class="cli"><div class="av">${esc(initials(d.nome))}</div><div style="min-width:0"><b title="${esc(d.nome)}">${esc(d.nome)}</b>${isMan(d)?'<span class="tag">MULTIPLO</span>':''}${d.az?`<small>${esc(d.az)}</small>`:`<small class="mono">${esc(d.id)}</small>`}</div></div></td>
       <td>${esc(d.tel)}</td>
       <td>${noMail(d)?`<span class="nomail">${ic('warn')} MAIL MANCANTE</span>`:esc(d.mail)}</td>
       <td>${d.piano?`<span class="pk">${esc(d.piano)}</span>`:'<span class="mut">—</span>'}</td>
       <td>${dmy(d.acq)}</td>
       <td>${d.scad?`<b>${dmy(d.scad)}</b><br>${chip}`:'<span class="nomail">MANCANTE</span>'}</td>
       <td><span class="pill ${d.stato}">${d.stato}</span>${d.stato==='Scaduto'?'<br>'+scadBtn(d):''}</td>
-      <td><div class="act"><button class="ibtn" title="Modifica" data-e="${esc(d.n)}">${ic('edit')}</button><button class="ibtn" title="Rinnova" data-r="${esc(d.n)}">${ic('ren')}</button><button class="ibtn d" title="Elimina" data-x="${esc(d.n)}">${ic('del')}</button></div></td></tr>`}).join('')||'<tr><td colspan="9" class="mut" style="text-align:center;padding:36px">Nessun dispositivo trovato.</td></tr>';
+      <td><div class="act"><button class="ibtn" title="Modifica" data-e="${esc(d.n)}">${ic('edit')}</button><button class="ibtn" title="Rinnova" data-r="${esc(d.n)}">${ic('ren')}</button><button class="ibtn d" title="Elimina" data-x="${esc(d.n)}">${ic('del')}</button></div></td></tr>`};
+  const empty='<tr><td colspan="9" class="mut" style="text-align:center;padding:36px">Nessun dispositivo trovato.</td></tr>';
+  const grouped=['scm','man','manalert'].includes(S.filter);
+  let html;
+  if(grouped&&rows.length){
+    const gmap={};rows.forEach(d=>{const k=(d.az||d.nome).trim();(gmap[k]=gmap[k]||[]).push(d)});
+    html=Object.keys(gmap).sort().map(k=>{const L=gmap[k];const op=!!S.open['t:'+k]||!!S.q;const ns=L.filter(d=>d.stato==='Scaduto').length;
+      return `<tr class="grp ${op?'open':''}" data-tg="${esc(k)}" title="Espandi / comprimi"><td colspan="9"><span class="car">▸</span> ${esc(k)} <span class="mut" style="font-weight:500">· ${L.length} dispositivi${ns?` · <b style="color:var(--bad)">${ns} scaduti</b>`:''}</span></td></tr>`+(op?L.map(rowHtml).join(''):'')}).join('');
+  } else html=slice.map(rowHtml).join('');
+  $('#tbody').innerHTML=html||empty;
+  $$('#tbody [data-tg]').forEach(tr=>tr.onclick=()=>{const k='t:'+tr.dataset.tg;S.open[k]=!S.open[k];renderDev()});
   $$('#tbody [data-e]').forEach(b=>b.onclick=()=>openDev(b.dataset.e));
   $$('#tbody [data-r]').forEach(b=>b.onclick=()=>openRen(b.dataset.r));
   $$('#tbody [data-x]').forEach(b=>b.onclick=()=>delDev(b.dataset.x));
   bindSc('#tbody');
   const bk=$('#bulk');if(bk){const ok=S.q&&rows.length>0&&rows.length<=80;bk.classList.toggle('hide',!ok);if(ok){$('#bulkN').textContent=rows.length;window.__bulk=rows.map(d=>d.n)}}
-  $('#pinfo').textContent=rows.length?`${S.page*size+1}–${Math.min(rows.length,S.page*size+size)} di ${rows.length}`:'0 risultati';
-  $('#prev').disabled=S.page<=0;$('#next').disabled=S.page>=pages-1;
+  $('#pinfo').textContent=grouped?`${rows.length} dispositivi · clicca un gruppo per espanderlo`:(rows.length?`${S.page*size+1}–${Math.min(rows.length,S.page*size+size)} di ${rows.length}`:'0 risultati');
+  $('#prev').disabled=grouped||S.page<=0;$('#next').disabled=grouped||S.page>=pages-1;
 }
 $('#search').oninput=e=>{S.q=e.target.value;S.page=0;renderDev()};
 $('#pageSize').onchange=e=>{S.size=+e.target.value;S.page=0;renderDev()};
@@ -515,9 +540,24 @@ function openDev(n){
   $('#mDevSub').textContent=d?'N. '+d.n+' · '+d.nome:'Se indichi solo la data di acquisto, la scadenza si calcola a +365 giorni.';
   $('#fNome').value=v.nome;$('#fAz').value=v.az;$('#fTel').value=v.tel;$('#fMail').value=v.mail;$('#fN').value=v.n;$('#fId').value=v.id;
   $('#fGest').value=v.gest||'Automatica';$('#fPiano').value=v.piano;$('#fStato').value=v.stato;$('#fAcq').value=v.acq;$('#fScad').value=v.scad;$('#fRiv').value=v.riv;$('#fSal').value=v.saluto;$('#fNote').value=v.note;
+  $('#rinnBox').classList.toggle('hide',!d);if(d)updateRinnBtn();
   openModal('mDev');
   if(d){const f=!d.mail||!/@/.test(d.mail)?'#fMail':!d.scad?'#fScad':!d.piano?'#fPiano':null;if(f)setTimeout(()=>{const e=$(f);e.focus();e.style.borderColor='var(--bad)';e.style.boxShadow='0 0 0 4px var(--bad-soft)';e.addEventListener('input',()=>{e.style.borderColor='';e.style.boxShadow=''},{once:true})},60)}
 }
+function updateRinnBtn(){
+  const d=S.editing,b=$('#fRinn');if(!d||!b)return;
+  if(d.rinnInv){b.className='sbtn y';b.innerHTML=ic('ok')+'Conferma inviata il '+dmy(d.rinnInv).slice(0,5)+' ↻ reinvia'}
+  else{b.className='sbtn b';b.innerHTML=ic('mail')+'Invia conferma rinnovo'}
+}
+$('#fRinn').onclick=async()=>{
+  const d=S.editing;if(!d)return;
+  if($('#fScad').value!==d.scad){toast('Salva prima la nuova scadenza, poi invia la conferma.',true);return}
+  if(noMail(d)){toast('Mail del cliente mancante.',true);return}
+  if(diff(d.scad,S.today)<0){toast('La scadenza è ancora nel passato: aggiorna la data di rinnovo e salva.',true);return}
+  if(!confirm((d.rinnInv?'La conferma è già stata inviata il '+dmy(d.rinnInv)+'.\nVuoi reinviarla a ':'Inviare la conferma di rinnovo (scadenza '+dmy(d.scad)+') a ')+d.nome+' ('+d.mail+')?'+(S.test?'\n\n(MODALITÀ TEST: la mail va a '+S.mailTest+')':'')))return;
+  const b=$('#fRinn');b.disabled=true;
+  try{S.devices=await api('api_sendRinnovo',d.n);S.editing=S.devices.find(x=>x.n===d.n);updateRinnBtn();toast(S.test?'Mail di PROVA inviata a '+S.mailTest+' (non registrata).':'Conferma di rinnovo inviata al cliente.');refreshView()}catch(e){toast(e.message,true)}finally{b.disabled=false}
+};
 $('#fAcq').onchange=()=>{if($('#fAcq').value&&!$('#fScad').value)$('#fScad').value=addD($('#fAcq').value,365)};
 $('#fSave').onclick=e=>busy(e.currentTarget,async()=>{
   const d={origN:S.editing?S.editing.n:'',n:$('#fN').value,nome:$('#fNome').value,az:$('#fAz').value,tel:$('#fTel').value,mail:$('#fMail').value,id:$('#fId').value,
@@ -596,7 +636,7 @@ async function renderSet(){
   $('#pSet').innerHTML='<div class="mut">Caricamento…</div>';
   try{S.settings=await api('api_getSettings');S.users=await api('api_users')}catch(e){toast(e.message,true);return}
   const s=S.settings;
-  const names={'AVVISO_1':'Avviso 1','AVVISO_2':'Avviso 2','AVVISO_3':'Avviso 3','AVVISO_4':'Avviso 4 (ultimo)','ULTIMATUM':'Ultimatum dopo la scadenza (automatico)','SCADUTO':'Mail "abbonamento scaduto" (pulsante rosso, manuale)'};
+  const names={'AVVISO_1':'Avviso 1','AVVISO_2':'Avviso 2','AVVISO_3':'Avviso 3','AVVISO_4':'Avviso 4 (ultimo)','ULTIMATUM':'Ultimatum dopo la scadenza (automatico)','SCADUTO':'Mail "abbonamento scaduto" (pulsante rosso, manuale)','RINNOVO':'Mail "conferma rinnovo" (pulsante nella scheda cliente)'};
   $('#pSet').innerHTML=`
   <div class="grid2 even">
    <div class="card pad"><h3>Parametri</h3><div class="stack">
@@ -614,9 +654,9 @@ async function renderSet(){
      <button class="btn ghost" id="btnCp" style="margin-top:12px">Aggiorna password</button></div>
   </div>
   <h3 style="margin:24px 0 8px">Testi delle mail</h3>
-  <div class="ph">Segnaposto: <code>{nome}</code> <code>{azienda}</code> <code>{dispositivo}</code> <code>{id}</code> <code>{scadenza}</code> <code>{giorni}</code> <code>{piano}</code> <code>{link_rinnovo}</code> <code>{data_disattivazione}</code><br>Formato: <code># Titolo</code> · <code>**grassetto**</code> · <code>[testo](link)</code></div>
+  <div class="ph">Segnaposto: <code>{nome}</code> <code>{azienda}</code> <code>{dispositivo}</code> <code>{id}</code> <code>{scadenza}</code> <code>{giorni}</code> <code>{piano}</code> <code>{link_rinnovo}</code> <code>{data_disattivazione}</code> <code>{info_avvisi}</code><br>Formato: <code># Titolo</code> · <code>**grassetto**</code> · <code>[testo](link)</code></div>
   ${s.tpls.map((t,i)=>`<div class="tpl"><h4>${names[t.key]||t.key}<label class="sw"><input type="checkbox" data-ta="${i}" ${t.attivo?'checked':''}> attivo</label></h4>
-    <div class="row3"><div><label>${t.key==='ULTIMATUM'?'Giorni dopo scad.':t.key==='SCADUTO'?'Non usato':'Giorni prima'}</label><input data-tg="${i}" type="number" value="${esc(t.giorni)}"></div><div><label>Oggetto</label><input data-to="${i}" value="${esc(t.oggetto)}"></div></div>
+    <div class="row3"><div><label>${t.key==='ULTIMATUM'?'Giorni dopo scad.':(t.key==='SCADUTO'||t.key==='RINNOVO')?'Non usato':'Giorni prima'}</label><input data-tg="${i}" type="number" value="${esc(t.giorni)}"></div><div><label>Oggetto</label><input data-to="${i}" value="${esc(t.oggetto)}"></div></div>
     <label>Testo</label><textarea data-tt="${i}">${esc(t.testo)}</textarea></div>`).join('')}
   <button class="btn ok" id="btnSaveSet">Salva impostazioni</button>`;
   $('#btnSaveSet').onclick=e=>busy(e.currentTarget,async()=>{
