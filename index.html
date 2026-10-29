@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <html lang="it">
 <head>
+<base target="_top">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Gettoniere-Shop – Abbonamenti Cloud</title>
-<meta name="robots" content="noindex,nofollow">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -275,6 +275,7 @@ pre.out{background:var(--surface2);border:1px solid var(--line);border-radius:12
       </section>
 
       <section id="pInv" class="hide"></section>
+      <section id="pCom" class="hide"></section>
       <section id="pSet" class="hide"></section>
     </div>
   </main>
@@ -314,6 +315,7 @@ pre.out{background:var(--surface2);border:1px solid var(--line);border-radius:12
 <div class="toast" id="toast"></div>
 
 <script>window.__API_URL="https://script.google.com/macros/s/AKfycby9wpR2uFVwW5Kx5Ik7b32Y1K9g1f1kelq8gL8eBT7kRHRPEegip5qulJgfLl9Bdk9J/exec";</script>
+
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -372,7 +374,7 @@ async function boot(){
   renderMode();renderTabs();setTab(S.tab);
 }
 function renderMode(){const b=$('#modeBadge');b.className='badge '+(S.test?'test':'live');b.textContent=S.test?'Modalità test':'Live';b.title=S.test?('Le mail vanno solo a '+S.mailTest):'Le mail partono ai clienti'}
-const TABS=[['dash','Cruscotto','dash'],['dev','Dispositivi','dev'],['imp','Importa Excel','up'],['inv','Invii & Log','mail'],['set','Impostazioni','set']];
+const TABS=[['dash','Cruscotto','dash'],['dev','Dispositivi','dev'],['imp','Importa Excel','up'],['inv','Invii & Log','mail'],['com','Comunicazioni','mail'],['set','Impostazioni','set']];
 function renderTabs(){
   const t=TABS.filter(x=>S.me.ruolo==='admin'||['dash','dev','imp'].includes(x[0]));
   $('#tabs').innerHTML=t.map(([k,l,i])=>`<button data-t="${k}">${ic(i)}<span class="t">${l}</span></button>`).join('');
@@ -380,11 +382,11 @@ function renderTabs(){
 }
 function setTab(t){
   S.tab=t;$$('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));
-  ['Dash','Dev','Imp','Inv','Set'].forEach(x=>$('#p'+x).classList.toggle('hide',x.toLowerCase()!==t));
+  ['Dash','Dev','Imp','Inv','Com','Set'].forEach(x=>$('#p'+x).classList.toggle('hide',x.toLowerCase()!==t));
   const T=TABS.find(x=>x[0]===t);$('#pageTitle').textContent=T[1];
   const h=new Date().getHours();
   $('#hello').textContent=t==='dash'?((h<13?'Buongiorno ':h<18?'Buon pomeriggio ':'Buonasera ')+S.me.nome+' — ecco la situazione di oggi.'):'';
-  if(t==='dash')renderDash();if(t==='dev')renderDev();if(t==='inv')renderInv();if(t==='set')renderSet();
+  if(t==='dash')renderDash();if(t==='dev')renderDev();if(t==='inv')renderInv();if(t==='com')renderCom();if(t==='set')renderSet();
 }
 
 /* derived */
@@ -630,6 +632,41 @@ async function renderInv(){
 }
 async function loadLog(){try{const l=await api('api_log');const b=$('#logb');if(!b)return;
   b.innerHTML=l.length?l.map(x=>`<tr><td>${esc(x.when)}</td><td class="mono">${esc(x.n)}</td><td>${esc(x.nome)}</td><td>${esc(x.dest)}</td><td><span class="pk">${esc(x.tipo)}</span></td><td>${esc(x.esito)}</td></tr>`).join(''):'<tr><td colspan="6" class="mut">Nessun invio registrato.</td></tr>'}catch(e){toast(e.message,true)}}
+
+
+/* comunicazioni a tutti i clienti attivi (rev.19) */
+async function renderCom(keep){
+  const P=$('#pCom');if(!keep)P.innerHTML='<div class="mut">Caricamento…</div>';
+  const incl=keep?keep.incl:false;
+  let info;try{info=await api('api_comInfo',incl)}catch(e){toast(e.message,true);return}
+  const ogg=keep?keep.ogg:info.oggetto,txt=keep?keep.txt:info.testo,n=info.destinatari.length;
+  P.innerHTML=`<div class="grid2">
+   <div class="card pad stack"><h3 style="margin:0">Comunicazione a tutti i clienti</h3>
+     <div class="mut" style="font-size:13px">Una mail per indirizzo a tutti i clienti con abbonamento <b>Attivo</b>; chi ha dato disdetta (o è disattivato) non la riceve. Puoi usare <code>{nome}</code> per il saluto personalizzato (es. "Gentile {nome},").</div>
+     <div><label>Oggetto</label><input id="cOgg" value="${esc(ogg)}"></div>
+     <div><label>Testo (modificabile)</label><textarea id="cTxt" rows="16" style="width:100%;font:inherit;line-height:1.5">${esc(txt)}</textarea></div>
+     <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" style="width:auto" id="cScad" ${incl?'checked':''}> Includi anche i clienti con abbonamento <b>Scaduto</b></label>
+     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+       <input id="cTo" value="${esc(S.mailTest)}" style="max-width:260px" placeholder="mail per la prova"><button class="btn ghost" id="cProva">Invia prova</button>
+       <button class="btn ${S.test?'warn':'bad'}" id="cInvia" style="margin-left:auto">${S.test?'Invia (TEST: 1 sola mail di esempio)':'Invia a '+n+' clienti'}</button></div>
+     <div class="mut" style="font-size:13px">Modalità: <span class="badge ${S.test?'test':'live'}">${S.test?'Test → '+esc(S.mailTest):'Live (ai clienti)'}</span> · ogni invio è registrato in <i>Invii &amp; Log</i> come COMUNICAZIONE · invii Gmail ancora disponibili oggi: ${info.quota}</div>
+     <pre class="out hide" id="cOut"></pre></div>
+   <div class="card pad"><h3 style="margin-top:0">Destinatari: ${n}</h3>
+     <div class="mut" style="font-size:13px;margin-bottom:8px">Esclusi: ${info.esclusi.Disdetto||0} disdetti, ${info.esclusi.Disattivo||0} disattivati${incl?'':', '+(info.esclusi.Scaduto||0)+' scaduti'}${info.senzaMail.length?` · <b style="color:#c0392b">${info.senzaMail.length} senza mail valida</b>`:''}</div>
+     ${info.senzaMail.length?`<details style="margin-bottom:8px"><summary>Senza mail (non riceveranno nulla)</summary><div class="mut" style="font-size:13px">${info.senzaMail.map(esc).join('<br>')}</div></details>`:''}
+     <div style="max-height:460px;overflow:auto"><ul class="list">${info.destinatari.map(d=>`<li><div class="who"><b>${esc(d.nome)}</b><small>n. ${esc(d.n)} · ${esc(d.mail)}</small></div></li>`).join('')}</ul></div></div></div>`;
+  const cur=()=>({ogg:$('#cOgg').value,txt:$('#cTxt').value,incl:$('#cScad').checked});
+  $('#cScad').onchange=()=>renderCom(cur());
+  const out=t=>{const o=$('#cOut');o.classList.remove('hide');o.textContent=t};
+  $('#cProva').onclick=e=>busy(e.currentTarget,async()=>{const c=cur();const r=await api('api_comProva',$('#cTo').value,c.ogg,c.txt);toast('Mail di prova inviata a '+r.dest)});
+  $('#cInvia').onclick=e=>{const c=cur();
+    const msg=S.test?'MODALITÀ TEST: partirà UNA sola mail di esempio a '+S.mailTest+'. Nessun cliente viene raggiunto. Procedere?'
+      :'ATTENZIONE: stai per inviare questa comunicazione a '+n+' CLIENTI (con '+'commerciale@ '+' in copia).\nL\'invio non si può annullare e non va ripetuto.\n\nOggetto: '+c.ogg+'\n\nConfermi?';
+    if(!confirm(msg))return;
+    busy(e.currentTarget,async()=>{const r=await api('api_comInvia',c.ogg,c.txt,c.incl);
+      out('Inviate '+r.inviate+' mail su '+r.totale+(r.test?' (TEST → '+r.mailTest+')':'')+(r.errori.length?'\n\nERRORI (non reinviare agli altri!):\n'+r.errori.join('\n'):''));
+      toast('Inviate '+r.inviate+' mail',r.errori.length>0)})};
+}
 
 /* impostazioni */
 async function renderSet(){
