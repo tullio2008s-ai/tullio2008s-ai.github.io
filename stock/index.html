@@ -805,6 +805,7 @@ async function rInv(soc){
   $('#view').innerHTML='<div class="empty"><span class="spin"></span> Caricamento stock…</div>';
   try{await loadStock()}catch(e){$('#view').innerHTML='<div class="note bad">'+esc(e.message)+'</div>';return}
   try{await ensureSnap(soc,S.idata[soc]||todayYmd())}catch(e){}
+  if(soc==='TULLIO'){try{S.sc=await api('api_scarichiState')}catch(e){S.sc=null}}
   if(S.tab!==SOC[soc].tab)return;
   $('#i-imp').onclick=()=>$('#i-file').click();
   $('#i-file').onchange=async e=>{const f=e.target.files[0];e.target.value='';if(!f)return;try{invImport(soc,XLSX.read(await f.arrayBuffer(),{type:'array'}),f.name)}catch(err){toast('File non leggibile: '+err.message,true)}};
@@ -818,6 +819,19 @@ function startConta(soc,righe){
   if(righe)righe.forEach(r=>{if(q[r.articoloId]!==undefined){q[r.articoloId]=String(r.qta).replace('.',',')}});
   S.conta={soc,data:asOf,nome:'Inventario '+dmy(asOf),q,c};
   if(S.tab!==SOC[soc].tab){S.tab=SOC[soc].tab;render()}else drawInv(soc);
+}
+
+function riepilogoMese(asOf){
+  const sc=S.sc;if(!sc||!S.stock)return '';const Mo=modelloSRL(sc,S.stock);if(!Mo)return '';
+  const m=asOf.slice(0,7),e=Mo.M[m],par=sc.param||{};
+  const L=(a,b,h)=>`<tr${h?' style="background:#FFD500;font-size:16px"':''}><td>${a}</td><td class="r nw">${b}</td></tr>`;
+  const mesiTab=Mo.mesi.map(k=>{const x=Mo.M[k];return `<tr class="mclk" data-m="${k}" style="cursor:pointer${k===m?';background:#FFF7C2':''}"><td><b>${meseLbl(k)}</b></td><td class="r nw">${eur(x.ap)}</td><td class="r nw">${x.ing?'+ '+eur(x.ing):'—'}</td><td class="r nw">${x.usV+x.usT+x.usM+x.usF?'− '+eur(x.usV+x.usT+x.usM+x.usF):'—'}</td><td class="r nw"><b>${eur(x.fine)}</b></td></tr>`}).join('');
+  let corpo;
+  if(e)corpo=`<div class="tw"><table><tbody>${L('Magazzino a inizio mese',eur(e.ap))}${L('+ Ingressi (acquisti materiali)',e.ing?'+ '+eur(e.ing):'—')}${L('− Uscite per vendite SRL',e.usV?'− '+eur(e.usV):'—')}${e.usT?L('− Trasferimento a Paysolution',' − '+eur(e.usT)):''}${e.usM?L('− Materiali di montaggio addebitati a Paysolution','− '+eur(e.usM)):''}${e.usF?L('− Vendita del residuo a Paysolution (31/10)','− '+eur(e.usF)):''}${L('TOTALE magazzino a fine '+meseLbl(m).toLowerCase(),eur(e.fine),1)}</tbody></table></div>`;
+  else if(m<Mo.mesi[0])corpo=`<div class="pad mut" style="padding:12px 16px">Prima del ${meseLbl(Mo.mesi[0])} non ci sono scarichi e acquisti caricati: vale l’inventario salvato${Mo.inv?' al '+dmy(Mo.inv.data)+' ('+eur(Mo.apertura)+')':''}.</div>`;
+  else corpo=`<div class="pad mut" style="padding:12px 16px">Dopo ${meseLbl(Mo.mesi[Mo.mesi.length-1])} non risultano movimenti: il magazzino resta ${eur(Mo.M[Mo.mesi[Mo.mesi.length-1]].fine)}.</div>`;
+  return `<div class="card" style="margin-bottom:12px"><div class="pad" style="padding:12px 16px 2px"><b>RIEPILOGO DEL MESE · ${meseLbl(m)}</b> <span class="mut" style="font-size:12.5px">valore a costo teorico: inventario ${Mo.inv?dmy(Mo.inv.data):'31/12/2025'} + acquisti − scarichi − trasferimenti</span></div>${corpo}
+    <details style="padding:6px 16px 12px"><summary class="mut" style="cursor:pointer">Tutti i mesi</summary><div class="tw"><table><thead><tr><th>Mese</th><th class="r">Inizio mese</th><th class="r">Ingressi</th><th class="r">Uscite</th><th class="r">Fine mese</th></tr></thead><tbody>${mesiTab}</tbody></table></div></details></div>`;
 }
 function drawInv(soc){
   const asOf=S.idata[soc]||todayYmd(),st=S.stock,G=giacMap(soc,asOf),cn_=S.conta&&S.conta.soc===soc?S.conta:null;
@@ -845,6 +859,7 @@ function drawInv(soc){
     <div class="mut" style="flex:1;min-width:240px">${spiega}${asOf!==todayYmd()?` <a href="#" id="i-oggi">Torna a oggi</a>`:''}</div>
     ${invs.length?`<label class="f" style="margin:0">Salvati: vai alla data<select id="i-dsel"><option value="">— scegli —</option>${invs.map(i=>`<option value="${i.data}" ${i.data===asOf?'selected':''}>${dmy(i.data)} · ${esc(i.nome||'')}</option>`).join('')}</select></label>`:''}</div>`;
   $('#view').innerHTML=`${dRef}
+  ${soc==='TULLIO'?riepilogoMese(asOf):''}
   <div class="kpis">${kp('Articoli',arts.length)}${kp('Materie prime',eur(V.materia))}${kp('Semilavorati',eur(V.semilavorato))}${kp('Prodotti finiti',eur(V.finito))}${kp('Attrezzature',eur(V.attrezzatura))}${kp('VALORE STOCK',eur(V.materia+V.semilavorato+V.finito+V.attrezzatura),1)}${kp('Ultima conta',last?dmy(last.data):'—')}</div>
   ${cn_?`<div class="note" style="display:flex;gap:12px;flex-wrap:wrap;align-items:center"><b>CONTA IN CORSO</b><label class="f" style="margin:0">Data inventario<input type="date" id="c-dat" value="${esc(cn_.data)}"></label><label class="f" style="margin:0;flex:1;min-width:180px">Nome<input id="c-nom" value="${esc(cn_.nome)}"></label>
     <span class="mut" style="flex-basis:100%">Le quantità sono precompilate con la giacenza teorica (ultima conta + carichi): correggile con il conteggio reale e ritocca i costi se serve. Alla conferma la conta viene salvata con la data e diventa la nuova base.</span>
@@ -860,6 +875,7 @@ function drawInv(soc){
   <div class="card tw">${invs.length?`<table><thead><tr><th>Data</th><th>Nome</th><th class="r">Articoli</th><th class="r">Valore stock</th><th>File</th><th></th></tr></thead><tbody>${invs.map(i=>`<tr><td class="nw"><b>${dmy(i.data)}</b></td><td>${esc(i.nome)}</td><td class="r">${i.nRighe}</td><td class="r nw"><span class="land">${eur(i.valore)}</span></td><td>${i.fileUrl?`<a href="${esc(i.fileUrl)}" target="_blank" rel="noopener">CSV su Drive</a>`:'<span class="mut">—</span>'}</td>
     <td class="nw r"><button class="btn sm" data-op="${i.id}">Apri</button> <button class="btn sm y" data-nx="${i.id}">Nuova conta da questa</button>${S.me.ruolo==='admin'?` <button class="btn sm d" data-dl="${i.id}">${ic('trash')}</button>`:''}</td></tr>`).join('')}</tbody></table>`:'<div class="empty">Nessuna conta salvata: fai la prima con «Nuova conta».</div>'}</div>`;
   $('#view').oninput=null;
+  $$('#view tr.mclk').forEach(t=>t.onclick=()=>{const k=t.dataset.m,end=k+'-'+String(new Date(+k.slice(0,4),+k.slice(5,7),0).getDate()).padStart(2,'0');goDate(end>todayYmd()?todayYmd():end)});
   const goDate=async v=>{if(!v||v>todayYmd())return;S.idata[soc]=v;try{await ensureSnap(soc,v)}catch(e){toast(e.message,true)}drawInv(soc)};
   const ds=$('#i-dsel');if(ds)ds.onchange=e=>goDate(e.target.value);
   const di=$('#i-date');if(di)di.onchange=e=>goDate(e.target.value);
@@ -1028,6 +1044,26 @@ function invImport(soc,wb,fname){
     toast('Inventario importato: '+cr.creati+' articoli creati'+(cr.saltati?' ('+cr.saltati+' già presenti)':'')+', '+r.nRighe+' righe, valore '+eur(r.valore)+'.')});
 }
 
+
+
+/* ---- Modello mensile magazzino SRL (valore): inizio, ingressi, uscite, fine mese ---- */
+function modelloSRL(sc,st){
+  const par=sc.param||{},cm=par.coeffMese||{},sm=(a,f)=>a.reduce((x,r)=>x+f(r),0);
+  const R=sc.righe.map(r=>{const c=cm[r.data.slice(0,7)];if(c==null||!(r.coeff>0)||(r.costoUnit!==''&&r.costoUnit!=null))return r;const k=r.imponibile*c;return {...r,coeff:c,costo:k,scarico:r.fonte==='Magazzino SRL'?k:r.scarico}});
+  if(!R.length)return null;
+  const inv=st.inventari.filter(i=>i.societa==='TULLIO'&&i.data<='2025-12-31').sort((a,b)=>b.data.localeCompare(a.data))[0],apertura=inv?inv.valore:par.inventario||0;
+  const acq={...(par.acquisti||{})};st.movimenti.filter(x=>x.societa==='TULLIO'&&x.tipo!=='scarico'&&x.data>'2025-12-31').forEach(x=>{const m=x.data.slice(0,7);acq[m]=(acq[m]||0)+(Number(x.qta)||0)*(Number(x.costo)||0)});
+  const mont={};(par.fatturePS||[]).forEach(f=>f.righe.filter(r=>r.t==='montaggio').forEach(r=>{mont[f.mese]=(mont[f.mese]||0)+r.i}));
+  const srlF=par.srlFinale!=null?par.srlFinale:0,vendM=(par.venditaData||'2026-10-31').slice(0,7);
+  let mesi=[...new Set([...R.map(r=>r.data.slice(0,7)),...Object.keys(acq),...Object.keys(mont),vendM])].sort();
+  const out={},mag={};mesi.forEach(m=>{mag[m]=sum_(R.filter(r=>r.data.slice(0,7)===m&&r.fonte==='Magazzino SRL'),r=>r.scarico)});
+  function sum_(a,f){return a.reduce((x,r)=>x+f(r),0)}
+  const acqT=sum_(mesi,m=>acq[m]||0),scT=sum_(mesi,m=>mag[m]),montT=sum_(mesi,m=>mont[m]||0);
+  const trasf={...(par.trasferimenti||{})};
+  if(!Object.keys(trasf).length){const T=apertura+acqT-scT-montT-srlF;trasf[par.trasfMese||'2026-03']=Math.round(T*100)/100}
+  let run=apertura;mesi.forEach(m=>{const e={ap:run,ing:acq[m]||0,usV:mag[m],usT:trasf[m]||0,usM:mont[m]||0,usF:m===vendM?srlF:0};e.fine=e.ap+e.ing-e.usV-e.usT-e.usM-e.usF;run=e.fine;out[m]=e});
+  return {mesi,M:out,apertura,inv,trasf};
+}
 
 /* ---- Scarichi magazzino SRL per vendite 2026 + analisi mensile ---- */
 const MESI=['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
