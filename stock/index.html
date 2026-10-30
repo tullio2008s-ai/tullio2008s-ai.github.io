@@ -1085,7 +1085,8 @@ async function rScarichi(){
   drawScarichi();
 }
 function drawScarichi(){
-  const sc=S.sc,R=sc.righe,par=sc.param||{},st=S.stock;
+  const sc=S.sc,par=sc.param||{},st=S.stock,cm=par.coeffMese||{};
+  const R=sc.righe.map(r=>{const c=cm[r.data.slice(0,7)];if(c==null||!(r.coeff>0)||(r.costoUnit!==''&&r.costoUnit!=null))return r;const k=Math.round(r.imponibile*c*100)/100;return {...r,coeff:c,costo:k,scarico:r.fonte==='Magazzino SRL'?k:r.scarico}});
   if(!R.length){$('#view').innerHTML='<div class="card pad"><div class="empty">Nessuna vendita caricata.<br>Clicca <b>Importa file vendite (.xlsx)</b> e scegli il file «Gettoniere vendute … per modello» (foglio <b>Righe</b>).</div></div>';$('#sc-csv').onclick=()=>{};return}
   const inv=st.inventari.filter(i=>i.societa==='TULLIO'&&i.data<='2025-12-31').sort((a,b)=>b.data.localeCompare(a.data))[0];
   const apertura=inv?inv.valore:par.inventario||0,aperturaLbl=inv?'Inventario salvato al '+dmy(inv.data):'Inventario al 31/12/2025 (dal file)';
@@ -1105,7 +1106,7 @@ function drawScarichi(){
   const prods=Object.values(byP).sort((a,b)=>b.v-a.v);
   $('#view').innerHTML=`<div class="kpis">${kp(esc(aperturaLbl),eur(apertura))}${kp('Acquisti materiali',eur(totA))}${kp('Scaricato per vendite',eur(-totS))}${kp('Magazzino teorico a fine periodo',eur(fine),1)}</div>
     <div class="card"><div class="tw"><table><thead><tr><th>Mese</th><th class="r">Righe</th><th class="r">Ricavo imponibile</th><th class="r">Scarico magazzino SRL</th><th class="r" title="Merce fornita da Paysolution: non esce dal magazzino SRL">Fornita da Paysolution (a costo)</th><th class="r">Acquisti (manuale)</th><th class="r">Magazzino teorico</th></tr></thead><tbody>${body}</tbody></table></div></div>
-    <p class="mut" style="font-size:13px;margin:8px 2px 14px">${esc(par.acquistiNota||'')} Clicca un mese per vedere le righe scaricate. Lo scarico è a <b>valore di costo</b> (prezzo di vendita × coefficiente del file, o costo da distinta dove indicato): il file non contiene i componenti, quindi la giacenza per articolo resta quella delle conte.</p>
+    <p class="mut" style="font-size:13px;margin:8px 2px 14px">${esc(par.acquistiNota||'')} Clicca un mese per vedere le righe scaricate. Lo scarico è a <b>valore di costo</b> (prezzo di vendita × coefficiente: ${Object.keys(cm).length?'<b>'+Object.keys(cm).sort().map(m=>MESI[+m.slice(5,7)-1].slice(0,3)+' '+Math.round(cm[m]*100)+'%').join(', ')+'</b>, altri mesi 40% come nel file':'40% come nel file'}; costo da distinta dove indicato): il file non contiene i componenti, quindi la giacenza per articolo resta quella delle conte.</p>
     ${recPS(par,M,mesi,acq)}
     ${mr?`<div class="card"><div class="pad" style="padding:14px 16px 4px"><b>${meseLbl(mr)} · ${det.length} righe scaricate</b></div><div class="tw"><table><thead><tr><th>Data</th><th>Documento</th><th>Cliente</th><th>Codice</th><th>Descrizione</th><th class="r">Q.tà</th><th class="r">Scarico €</th></tr></thead><tbody>${det.map(r=>`<tr><td class="nw">${dmy(r.data)}</td><td class="nw">${esc(r.documento)}</td><td>${esc(r.cliente)}</td><td class="nw">${esc(r.codice)}</td><td>${esc(r.descrizione)}</td><td class="r">${r.qta}</td><td class="r nw">${eur(r.scarico)}</td></tr>`).join('')||'<tr><td colspan="7" class="empty">Nessuno scarico dal magazzino SRL.</td></tr>'}</tbody></table></div></div>`:''}
     <div class="lbl" style="margin:18px 2px 8px">SCARICO PER PRODOTTO (codice negozio) · ${prods.length} prodotti</div>
