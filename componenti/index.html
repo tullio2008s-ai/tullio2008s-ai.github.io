@@ -1060,7 +1060,9 @@ function modelloSRL(sc,st){
   function sum_(a,f){return a.reduce((x,r)=>x+f(r),0)}
   const acqT=sum_(mesi,m=>acq[m]||0),scT=sum_(mesi,m=>mag[m]),montT=sum_(mesi,m=>mont[m]||0);
   const trasf={...(par.trasferimenti||{})};
-  if(!Object.keys(trasf).length){const T=apertura+acqT-scT-montT-srlF;trasf[par.trasfMese||'2026-03']=Math.round(T*100)/100}
+  if(!Object.keys(trasf).length){const T=Math.round((apertura+acqT-scT-montT-srlF)*100)/100;let done=0;
+    (par.fatturePS||[]).forEach(f=>{const r=f.righe.filter(x=>x.t==='recupero').reduce((x,y)=>x+y.i,0);if(r){trasf[f.mese]=(trasf[f.mese]||0)+r;done+=r}});
+    trasf[vendM]=(trasf[vendM]||0)+Math.round((T-done)*100)/100}
   let run=apertura;mesi.forEach(m=>{const e={ap:run,ing:acq[m]||0,usV:mag[m],usT:trasf[m]||0,usM:mont[m]||0,usF:m===vendM?srlF:0};e.fine=e.ap+e.ing-e.usV-e.usT-e.usM-e.usF;run=e.fine;out[m]=e});
   return {mesi,M:out,apertura,inv,trasf};
 }
