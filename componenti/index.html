@@ -299,16 +299,16 @@ async function boot(){
 
 /* ============ Navigazione ============ */
 const TABS=[['step','STEP 1 · Listino'],['listino','Listino componenti','list'],['carica','Carica fatture','up'],['fatture','Fatture caricate','doc'],['trasporti','TRASPORTI','truck'],
-  ['step','STEP 2 · Prodotti'],['distinte','Distinte base','box'],['costi','Costi prodotto','list'],['catalogo','Catalogo prodotti','list'],['step','STOCK · Magazzino'],['invA','Inventario PAYSOLUTION','box'],['invB','Inventario Tullio Serci','box'],['scarichi','Scarichi e analisi mensile','truck'],['carico','Carico materiali','up'],['step','Sistema'],['imp','Impostazioni','cog']];
+  ['step','STEP 2 · Prodotti'],['distinte','Distinte base','box'],['costi','Costi prodotto','list'],['catalogo','Catalogo prodotti','list'],['step','STOCK · Magazzino'],['invA','Inventario PAYSOLUTION','box'],['invB','Inventario Tullio Serci','box'],['scarichi','Scarichi e analisi mensile','truck'],['coeff','Coefficienti mensili','list'],['carico','Carico materiali','up'],['step','Sistema'],['imp','Impostazioni','cog']];
 const STOCK_ONLY=/\/stock\/?(index\.html)?$/.test(location.pathname)||/[?&]stock=1/.test(location.search);
-const STOCK_TABS=['invA','invB','scarichi','carico'];
+const STOCK_TABS=['invA','invB','scarichi','coeff','carico'];
 function render(){
   if(STOCK_ONLY&&!STOCK_TABS.includes(S.tab))S.tab='invA';
   const tl=STOCK_ONLY?TABS.filter(t=>t[0]==='step'?t[1].startsWith('STOCK'):STOCK_TABS.includes(t[0])):TABS;
   const lk=STOCK_ONLY?new URL(/stock\/?(index\.html)?$/.test(location.pathname)?'../componenti/':'index.html',location.href).href:new URL(/componenti\/?(index\.html)?$/.test(location.pathname)?'../stock/':'?stock=1',location.href).href;
   $('#nav').innerHTML=tl.map(t=>t[0]==='step'?`<div class="step">${t[1]}</div>`:`<button data-tab="${t[0]}" class="${S.tab===t[0]?'on':''}">${ic(t[2])}${t[1]}</button>`).join('')+`<a href="${lk}" target="_blank" rel="noopener" style="display:block;margin:14px 12px 0;color:#FFD500;font-size:12.5px;font-weight:700">${STOCK_ONLY?'Apri la consolle costi ↗':'Apri la pagina Stock da sola ↗'}</a>`;
   $$('#nav button').forEach(b=>b.onclick=()=>{S.tab=b.dataset.tab;render()});
-  ({listino:rListino,carica:rCarica,fatture:rFatture,trasporti:rTrasporti,distinte:rDistinte,costi:rCosti,imp:rImp,invA:()=>rInv('PAYSOLUTION'),invB:()=>rInv('TULLIO'),scarichi:rScarichi,carico:rCarico,catalogo:rCatalogo})[S.tab]();
+  ({listino:rListino,carica:rCarica,fatture:rFatture,trasporti:rTrasporti,distinte:rDistinte,costi:rCosti,imp:rImp,invA:()=>rInv('PAYSOLUTION'),invB:()=>rInv('TULLIO'),scarichi:rScarichi,coeff:rCoeff,carico:rCarico,catalogo:rCatalogo})[S.tab]();
 }
 function head(t,s,act=''){$('#ttl').textContent=t;$('#sub').textContent=s;$('#topact').innerHTML=act}
 
@@ -1287,6 +1287,49 @@ function pdfScar(mesi,M,apertura,aperturaLbl,prods){
     foot:[{content:'TOTALE',colSpan:3},...mm.map(m=>R_(eurN(prods.reduce((s,p)=>s+(p.m[m]||0),0)))),R_(eurN(prods.reduce((s,p)=>s+p.v,0)))],fs:6.8,cols:{0:{cellWidth:24}}});
   pdfSave(R,'Scarichi_mensili_Tullio_Serci_srl.pdf','Scarichi e analisi mensile · Tullio Serci srl');
   }catch(err){toast(err.message,true)}
+}
+
+/* ---- Coefficienti mensili di scarico: riepilogo, modifica del mese aperto, chiusura ---- */
+const pctS=c=>c==null?'—':(Math.round(c*1000000)/10000).toString().replace('.',',')+'%';
+async function rCoeff(){
+  head('COEFFICIENTI MENSILI','Tullio Serci srl · coefficiente di scarico del magazzino, mese per mese · il mese si modifica finché non lo chiudi');
+  $('#view').innerHTML='<div class="empty"><span class="spin"></span> Caricamento…</div>';
+  try{await loadStock();S.sc=await api('api_scarichiState')}catch(e){$('#view').innerHTML='<div class="note bad">'+esc(e.message)+'</div>';return}
+  if(S.tab!=='coeff')return;drawCoeff();
+}
+function coeffInfo(sc,m){
+  const par=sc.param||{},cm=par.coeffMese||{},rr=sc.righe.filter(r=>r.data.slice(0,7)===m&&r.fonte==='Magazzino SRL'&&r.coeff>0&&!(r.costoUnit!==''&&r.costoUnit!=null));
+  const tutte=sc.righe.filter(r=>r.data.slice(0,7)===m);
+  const file=rr.length?rr[0].coeff:null,imp=cm[m]!=null?cm[m]:null;
+  return {n:rr.length,nTot:tutte.length,nDist:tutte.filter(r=>r.fonte==='Magazzino SRL'&&r.costoUnit!==''&&r.costoUnit!=null).length,ricSogg:rr.reduce((s,r)=>s+r.imponibile,0),eff:imp!=null?imp:file,origine:imp!=null?'impostato':(file!=null?'da file vendite':'—')};
+}
+function drawCoeff(){
+  const sc=S.sc,par=sc.param||{},adm=S.me.ruolo==='admin',chiusi=par.mesiChiusi||{};
+  const Mo=modelloSRL(sc,S.stock);
+  if(!Mo){$('#view').innerHTML='<div class="card pad"><div class="empty">Nessuna vendita caricata: importa prima il file in «Scarichi e analisi mensile».</div></div>';return}
+  const oggiM=todayYmd().slice(0,7),mesi=Mo.mesi,I={};mesi.forEach(m=>I[m]=coeffInfo(sc,m));
+  const aperti=mesi.filter(m=>!chiusi[m]),primoAperto=aperti[0];
+  const prec=aperti.filter(m=>m<oggiM);
+  const save=async p=>{sc.param=await api('api_saveScarichiParam',p);drawCoeff()};
+  const riga=m=>{const x=Mo.M[m],i=I[m],ch=chiusi[m],edit=!ch&&i.n>0,isFirst=m===primoAperto,inCorso=m===oggiM;
+    const stato=ch?`<span class="chip">CHIUSO</span><div class="mut" style="font-size:11.5px">${dmy(ch.data)}${ch.utente?' · '+esc(ch.utente):''}</div>`:`<span class="chip warn">${inCorso?'IN CORSO':'APERTO'}</span>`;
+    const coef=ch?`<b>${pctS(ch.coeff!=null?ch.coeff:i.eff)}</b>`:edit?`<input class="cf" data-m="${m}" value="${i.eff==null?'':pctS(i.eff).replace('%','')}" style="width:96px;text-align:right"> %`:'<span class="mut">—</span>';
+    const az=ch?(adm?`<button class="btn sm" data-ro="${m}">Riapri</button>`:''):edit?`<button class="btn sm y" data-cl="${m}" ${isFirst?'':'disabled title="Chiudi prima i mesi precedenti"'}>Chiudi mese</button>`:'';
+    return `<tr${inCorso?' style="background:#FFF7C2"':''}><td><b>${meseLbl(m)}</b></td><td>${stato}</td><td class="r nw">${coef}</td><td class="mut">${ch?'chiuso':i.origine}${i.nDist?`<div style="font-size:11.5px">${i.nDist} righe con costo da distinta</div>`:''}</td>
+      <td class="r nw">${eur(i.ricSogg)}</td><td class="r nw"><b>${eur(x.usV)}</b></td><td class="r nw"><b>${eur(x.fine)}</b></td><td class="nw r">${az}</td></tr>`};
+  $('#view').innerHTML=`<div class="note">Il <b>coefficiente</b> trasforma il ricavo imponibile delle vendite in <b>costo scaricato dal magazzino SRL</b> (scarico = imponibile × coefficiente). Finché il mese è aperto puoi correggerlo e gli importi si aggiornano subito; con <b>«Chiudi mese»</b> il coefficiente e il magazzino di fine mese vengono fissati e non sono più modificabili${adm?' (solo l’amministratore può riaprire)':''}. I mesi si chiudono in ordine.</div>
+   ${prec.length?`<div class="tools noprint" style="margin:0 0 10px"><button class="btn" id="cf-bulk">Chiudi tutti i mesi precedenti a ${meseLbl(oggiM)} (${prec.length})</button></div>`:''}
+   <div class="card"><div class="tw"><table><thead><tr><th>Mese</th><th>Stato</th><th class="r">Coefficiente</th><th>Origine</th><th class="r">Ricavo soggetto a coeff.</th><th class="r">Scarico magazzino SRL</th><th class="r">Magazzino a fine mese</th><th></th></tr></thead><tbody>${mesi.map(riga).join('')}</tbody></table></div></div>
+   <p class="mut" style="font-size:13px;margin:8px 2px">Le righe con costo preso dalla distinta non usano il coefficiente. «Da file vendite» = coefficiente del file importato (non ancora impostato a mano). Il coefficiente che modifichi qui vale anche in «Scarichi e analisi mensile», nel riepilogo di Inventario e nei PDF.</p>`;
+  $$('#view input.cf').forEach(i=>i.onchange=async()=>{const m=i.dataset.m,v=num(i.value);if(isNaN(v)||v<=0||v>100){toast('Coefficiente non valido (da 0 a 100 %).',true);drawCoeff();return}
+    try{const p={...par};p.coeffMese={...(p.coeffMese||{}),[m]:v/100};await save(p);toast('Coefficiente di '+meseLbl(m)+' aggiornato a '+pctS(v/100))}catch(err){toast(err.message,true)}});
+  $$('#view [data-cl]').forEach(b=>b.onclick=()=>{const m=b.dataset.cl,x=Mo.M[m],eff=I[m].eff;
+    if(!confirm('Chiudere '+meseLbl(m)+'?\n\nCoefficiente: '+pctS(eff)+'\nScarico dal magazzino SRL: '+eur(x.usV)+'\nMagazzino a fine mese: '+eur(x.fine)+'\n\nDopo la chiusura il coefficiente non è più modificabile.'))return;
+    busy(b,async()=>{const p={...par};p.coeffMese={...(p.coeffMese||{}),[m]:eff};p.mesiChiusi={...(p.mesiChiusi||{}),[m]:{data:todayYmd(),coeff:eff,scarico:x.usV,fine:x.fine,utente:S.me.nome}};await save(p);toast(meseLbl(m)+' chiuso.')})});
+  $$('#view [data-ro]').forEach(b=>b.onclick=()=>{const m=b.dataset.ro;if(!confirm('Riaprire '+meseLbl(m)+'? Il coefficiente tornerà modificabile.'))return;
+    busy(b,async()=>{const p={...par};p.mesiChiusi={...(p.mesiChiusi||{})};delete p.mesiChiusi[m];await save(p);toast(meseLbl(m)+' riaperto.')})});
+  const bk=$('#cf-bulk');if(bk)bk.onclick=()=>{if(!confirm('Chiudere questi mesi con i coefficienti attuali?\n\n'+prec.map(m=>meseLbl(m)+': '+pctS(I[m].eff)+' · scarico '+eur(Mo.M[m].usV)).join('\n')+'\n\nResta aperto solo '+meseLbl(oggiM)+'.'))return;
+    busy(bk,async()=>{const p={...par};p.coeffMese={...(p.coeffMese||{})};p.mesiChiusi={...(p.mesiChiusi||{})};prec.forEach(m=>{const e=I[m].eff;if(e!=null)p.coeffMese[m]=e;p.mesiChiusi[m]={data:todayYmd(),coeff:e,scarico:Mo.M[m].usV,fine:Mo.M[m].fine,utente:S.me.nome}});await save(p);toast('Mesi chiusi.')})};
 }
 
 /* ---- Carico materiali ---- */
