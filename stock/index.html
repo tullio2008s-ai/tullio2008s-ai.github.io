@@ -322,11 +322,14 @@ function rListino(){
     <div class="search">${ic('search')}<input id="l-q" placeholder="Cerca per codice, nome, descrizione, fornitore…" value="${esc(S.q)}"></div>
     <select id="l-f"><option value="">Tutti i fornitori</option>${suppliers().map(s=>`<option ${S.fForn===s?'selected':''}>${esc(s)}</option>`).join('')}</select>
     <button class="btn sm hide" id="l-ren" title="Rinomina il fornitore selezionato o uniscilo a un altro">Rinomina / unisci fornitore</button>
+    <select id="l-src"><option value="">Listino + da inventario</option><option value="list" ${S.lsrc==='list'?'selected':''}>Solo listino (fatture)</option><option value="inv" ${S.lsrc==='inv'?'selected':''}>Solo da inventario</option></select> <button class="btn sm" id="l-abb" title="Propone per ogni articolo di inventario il componente più simile">Abbina in blocco</button>
     <select id="l-v"><option value="">€ e $</option><option value="EUR" ${S.fVal==='EUR'?'selected':''}>Solo EUR</option><option value="USD" ${S.fVal==='USD'?'selected':''}>Solo USD</option></select>
   </div>
   <div class="card tw"><div id="l-tab"></div></div>`;
   $('#l-q').oninput=e=>{S.q=e.target.value;lTab()};$('#l-f').onchange=e=>{S.fForn=e.target.value;lTab()};$('#l-v').onchange=e=>{S.fVal=e.target.value;lTab()};
   $('#l-add').onclick=()=>acquistoForm();
+  $('#l-src').onchange=e=>{S.lsrc=e.target.value;lTab()};$('#l-abb').onclick=()=>{if(!S.stock){toast('Inventari in caricamento…');return}abbinaBlocco()};
+  loadStock().then(()=>{if(S.tab==='listino')lTab()}).catch(()=>{});
   const rb=$('#l-ren');rb.classList.toggle('hide',!S.fForn);$('#l-f').addEventListener('change',()=>rb.classList.toggle('hide',!S.fForn));
   rb.onclick=()=>{const to=prompt('Nuovo nome per il fornitore «'+S.fForn+'».\nSe esiste già un altro fornitore con quel nome, i due verranno uniti (i componenti con lo stesso codice si fondono).',S.fForn);if(!to||to.trim()===S.fForn)return;busy(rb,async()=>{const n=await api('api_renameFornitore',S.fForn,to.trim());S.fForn=to.trim();await reload();render();toast(n+' righe aggiornate.')})};
   $('#l-csv').onclick=()=>csv([['Fornitore','Codice','Componente','Descrizione','U.M.','Valuta orig.','Ultimo prezzo orig.','Prezzo EXW €','Trasporto €/pz','Trasporto incluso','Landed € (ultimo)','Landed medio €','Landed min €','Landed max €','Data ultimo acquisto','N. acquisti'],
@@ -334,6 +337,7 @@ function rListino(){
   lTab();
 }
 function lFiltered(){
+  if(S.lsrc==='inv')return [];
   const t=norm(S.q).split(' ').filter(Boolean);
   let a=LIST.filter(c=>(!S.fForn||c.fornitore===S.fForn)&&(!S.fVal||c.rows.some(r=>r.valuta===S.fVal))&&(!t.length||t.every(w=>norm([c.codice,c.nome,c.descrizione,c.fornitore].join(' ')).includes(w))));
   const k=S.sort.k,d=S.sort.d,g={nome:c=>norm(c.nome),codice:c=>norm(c.codice),fornitore:c=>norm(c.fornitore),eur:c=>c.eurLast??-1,land:c=>c.landLast??-1,data:c=>c.data||'',var:c=>c.var??-99,n:c=>c.n}[k];
@@ -341,18 +345,20 @@ function lFiltered(){
 }
 function lTab(){
   const a=lFiltered(),col=(k,l,cls='')=>`<th class="s ${cls}" data-k="${k}">${l}${S.sort.k===k?(S.sort.d>0?' ▲':' ▼'):''}</th>`;
-  $('#l-tab').innerHTML=a.length?`<table><thead><tr>${col('codice','Codice')}${col('nome','Componente')}${col('fornitore','Fornitore')}${col('eur','Prezzo EXW €','r')}<th class="r" title="Costo di trasporto unitario, separato dal prezzo">Trasporto €/pz</th><th title="Trasporto incluso nel prezzo (il prezzo è già landed)">Incl.</th>${col('land','Landed €','r')}${col('var','Var.','r')}${col('data','Ultimo acq.')}${col('n','Acq.','r')}</tr></thead><tbody>${a.slice(0,500).map(c=>{const l=c.last,inc=l.traspIncl==='SI';return `
-    <tr class="click" data-k="${esc(c.key)}"><td class="nw">${esc(c.codice)||'<span class="mut">—</span>'}</td>
+  const IR=S.lsrc==='list'?{n:0,html:''}:invRowsHtml(),IC=invPerCodice();
+  $('#l-tab').innerHTML=(a.length||IR.n)?`<table><thead><tr>${col('codice','Codice')}${col('nome','Componente')}${col('fornitore','Fornitore')}${col('eur','Prezzo EXW €','r')}<th class="r" title="Costo di trasporto unitario, separato dal prezzo">Trasporto €/pz</th><th title="Trasporto incluso nel prezzo (il prezzo è già landed)">Incl.</th>${col('land','Landed €','r')}${col('var','Var.','r')}${col('data','Ultimo acq.')}${col('n','Acq.','r')}</tr></thead><tbody>${a.slice(0,500).map(c=>{const l=c.last,inc=l.traspIncl==='SI';return `
+    <tr class="click" data-k="${esc(c.key)}"><td class="nw">${esc(c.codice)||'<span class="mut">—</span>'}${c.codice&&IC[norm(c.codice).replace(/ /g,'')]?`<div><span class="chip" title="${esc(IC[norm(c.codice).replace(/ /g,'')].map(x=>SOC[x.societa].nome+': '+x.nome).join(' · '))}">in inventario</span></div>`:''}</td>
     <td><b>${esc(c.nome)}</b>${c.descrizione?`<div class="mut" style="font-size:12.5px">${esc(c.descrizione)}</div>`:''}</td><td>${esc(c.fornitore)}</td>
     <td class="r nw"><b>${eurP(c.eurLast)}</b>${l.valuta==='USD'?`<div class="mut" style="font-size:11.5px">${money(l.prezzo,'USD')} <span class="chip usd">USD</span></div>`:''}</td>
     <td class="r nw ed"><input class="tr-in" data-id="${l.id}" value="${l.trasporto==null?'':esc(String(Math.round(l.trasporto*10000)/10000).replace('.',','))}" placeholder="0,00" ${inc?'disabled title="Trasporto già incluso nel prezzo"':''}></td>
     <td class="ed" style="text-align:center"><input type="checkbox" class="tr-ck" data-id="${l.id}" ${inc?'checked':''} title="Trasporto incluso SI/NO"></td>
     <td class="r nw">${c.trLast>0?`<span class="land">${eurP(c.landLast)}</span>`:`<b>${eurP(c.landLast)}</b>`}</td>
     <td class="r">${c.var==null?'<span class="mut">—</span>':`<span class="chip ${c.var>0.0005?'up':c.var<-0.0005?'dn':''}">${c.var>0?'+':''}${fmt(c.var*100,1,1)}%</span>`}</td>
-    <td class="nw">${dmy(c.data)}${oldChip(c.data)}</td><td class="r">${c.n}</td></tr>`}).join('')}</tbody></table>${a.length>500?`<div class="empty">Mostrati i primi 500 su ${a.length}: affina la ricerca.</div>`:''}`
+    <td class="nw">${dmy(c.data)}${oldChip(c.data)}</td><td class="r">${c.n}</td></tr>`}).join('')}${IR.html}</tbody></table>${a.length>500?`<div class="empty">Mostrati i primi 500 su ${a.length}: affina la ricerca.</div>`:''}`
     :`<div class="empty">${LIST.length?'Nessun componente corrisponde alla ricerca.':'Il listino è vuoto: carica le prime fatture dalla sezione “Carica fatture”.'}</div>`;
   $$('#l-tab th.s').forEach(h=>h.onclick=()=>{const k=h.dataset.k;S.sort=S.sort.k===k?{k,d:-S.sort.d}:{k,d:1};lTab()});
   $$('#l-tab tr.click').forEach(r=>r.onclick=e=>{if(e.target.closest('.ed'))return;compDetail(r.dataset.k)});
+  $$('#l-tab [data-pa]').forEach(b=>b.onclick=()=>{const x=S.stock.articoli.find(y=>y.id===b.dataset.pa);if(x)propostaModal(x)});
   const saveTr=async el=>{const id=el.dataset.id,a=S.acquisti.find(x=>x.id===id);if(!a)return;const tr=$('.tr-in[data-id="'+id+'"]'),ck=$('.tr-ck[data-id="'+id+'"]');
     const v=tr.value.trim()===''?null:num(tr.value);if(v!=null&&(isNaN(v)||v<0)){toast('Costo trasporto non valido.',true);return}
     try{await api('api_saveAcquisto',{...a,trasporto:el.classList.contains('tr-in')?v:a.trasporto,traspIncl:ck.checked?'SI':'NO'});await reload();lTab();toast('Trasporto aggiornato.')}catch(e){toast(e.message,true)}};
@@ -1345,6 +1351,63 @@ function drawCoeff(){
     busy(b,async()=>{const p={...par};p.mesiChiusi={...(p.mesiChiusi||{})};delete p.mesiChiusi[m];await save(p);toast(meseLbl(m)+' riaperto.')})});
   const bk=$('#cf-bulk');if(bk)bk.onclick=()=>{if(!confirm('Chiudere questi mesi con i coefficienti attuali?\n\n'+prec.map(m=>meseLbl(m)+': '+pctS(I[m].eff)+' · scarico '+eur(Mo.M[m].usV)).join('\n')+'\n\nResta aperto solo '+meseLbl(oggiM)+'.'))return;
     busy(bk,async()=>{const p={...par};p.coeffMese={...(p.coeffMese||{})};p.mesiChiusi={...(p.mesiChiusi||{})};prec.forEach(m=>{const e=I[m].eff;if(e!=null)p.coeffMese[m]=e;p.mesiChiusi[m]={data:todayYmd(),coeff:e,scarico:Mo.M[m].usV,fine:Mo.M[m].fine,utente:S.me.nome}});await save(p);toast('Mesi chiusi.')})};
+}
+
+/* ---- Listino + articoli da inventario: abbinamento per codice simile ---- */
+const STOPW=new Set(['di','da','del','della','per','con','e','il','la','le','lo','in','a','pz','x','mm','cm','nuovo','nuove','varie','vari']);
+const tkn=s=>norm(s).split(' ').filter(w=>w.length>1&&!STOPW.has(w));
+function codiciListino(){return new Set(LIST.map(c=>norm(c.codice).replace(/ /g,'')).filter(Boolean))}
+function artInv(){return S.stock?S.stock.articoli.filter(a=>a.attivo!=='NO'):[]}
+function artDaInv(){const cl=codiciListino();return artInv().filter(a=>!(norm(a.codice).replace(/ /g,'')&&cl.has(norm(a.codice).replace(/ /g,''))))}
+function invPerCodice(){const m={};artInv().forEach(a=>{const k=norm(a.codice).replace(/ /g,'');if(k)(m[k]=m[k]||[]).push(a)});return m}
+function simScore(a,c){
+  const ak=norm(a.codice).replace(/ /g,''),ck=norm(c.codice).replace(/ /g,''),an=norm(a.nome).replace(/ /g,'');
+  if(ak&&ck&&ak===ck)return 1;
+  if(ck&&an&&(an===ck||an.includes(ck)&&ck.length>=4))return .95;
+  const A=new Set(tkn((a.nome||'')+' '+(a.codice||''))),B=new Set(tkn((c.nome||'')+' '+(c.descrizione||'')+' '+(c.codice||'')));
+  if(!A.size||!B.size)return 0;let n=0;A.forEach(w=>{if(B.has(w))n++});
+  let s=n/Math.sqrt(A.size*B.size);
+  const sf=norm(a.sottocategoria),cf=norm(c.fornitore);if(sf&&cf&&(cf.includes(sf)||sf.includes(cf)))s+=.15;
+  return Math.min(s,.94);
+}
+const proposte=(a,k=5)=>LIST.map(c=>({c,s:simScore(a,c)})).filter(x=>x.s>=.3).sort((x,y)=>y.s-x.s).slice(0,k);
+const pctM=s=>Math.round(s*100)+'%';
+function invRowsHtml(){
+  const t=norm(S.q).split(' ').filter(Boolean);
+  const a=artDaInv().filter(x=>(!S.fForn||norm(x.sottocategoria)===norm(S.fForn))&&(!t.length||t.every(w=>norm([x.codice,x.nome,x.categoria,x.sottocategoria].join(' ')).includes(w))))
+    .sort((x,y)=>norm(x.nome).localeCompare(norm(y.nome)));
+  const G={};['PAYSOLUTION','TULLIO'].forEach(s=>{try{G[s]=giacMap(s,todayYmd())}catch(e){G[s]={}}});
+  const html=a.slice(0,300).map(x=>{const g=(G[x.societa]||{})[x.id],q=g?g.qta:null;
+    return `<tr data-ai="${x.id}" style="background:#FFFBE0"><td class="nw">${x.codice?esc(x.codice):'<span class="mut">senza codice</span>'}</td>
+    <td><span class="chip warn" style="margin-right:6px">DA INVENTARIO</span><b>${esc(x.nome||'—')}</b><div class="mut" style="font-size:12.5px">${esc(SOC[x.societa]?SOC[x.societa].nome:x.societa)}${x.categoria?' · '+esc(x.categoria):''}</div></td><td>${esc(x.sottocategoria)||'<span class="mut">—</span>'}</td>
+    <td class="r nw">${x.costo==null?'<span class="mut">—</span>':'<b>'+eurP(x.costo)+'</b><div class="mut" style="font-size:11.5px">costo inventario</div>'}</td>
+    <td colspan="4" class="mut">${q==null?'':'Giacenza '+fq(q)+' '+esc(x.um||'')}</td><td colspan="2" class="r nw"><button class="btn sm y" data-pa="${x.id}">Proponi abbinamento</button></td></tr>`}).join('');
+  return {n:a.length,html:html+(a.length>300?`<tr><td colspan="10" class="mut" style="text-align:center">Mostrati i primi 300 articoli da inventario su ${a.length}: affina la ricerca.</td></tr>`:'')};
+}
+function propostaModal(a){
+  const P=proposte(a,6);
+  const w=modal(`<div class="mh"><h3>Abbina «${esc(a.nome||a.codice)}»</h3><button class="x">${ic('x')}</button></div><div class="mb">
+    <div class="mut" style="margin-bottom:10px">${esc(SOC[a.societa].nome)}${a.categoria?' · '+esc(a.categoria):''}${a.sottocategoria?' · '+esc(a.sottocategoria):''}${a.codice?' · codice attuale <b>'+esc(a.codice)+'</b>':' · senza codice'}</div>
+    ${P.length?`<div class="tw"><table><thead><tr><th class="r">Somiglianza</th><th>Codice</th><th>Componente</th><th>Fornitore</th><th class="r">Landed €</th><th></th></tr></thead><tbody>${P.map((p,i)=>`<tr><td class="r"><b>${pctM(p.s)}</b></td><td class="nw">${esc(p.c.codice)||'<span class="mut">senza codice</span>'}</td><td>${esc(p.c.nome)}${p.c.descrizione?`<div class="mut" style="font-size:12px">${esc(p.c.descrizione)}</div>`:''}</td><td>${esc(p.c.fornitore)}</td><td class="r nw">${eurP(costOf(p.c))}</td>
+      <td class="r nw">${p.c.codice?`<button class="btn sm y" data-ab="${i}">Abbina</button>`:'<span class="mut" style="font-size:12px">assegna prima un codice</span>'}</td></tr>`).join('')}</tbody></table></div>
+      <p class="mut" style="font-size:13px;margin-top:10px">«Abbina» assegna all’articolo il codice del componente del listino: da quel momento l’articolo non è più «da inventario» ma compare sulla riga del listino. Il nome e le quantità dell’inventario non cambiano.</p>`
+      :'<div class="empty">Nessun componente del listino somiglia a questo articolo.</div>'}
+    <div class="tools" style="margin-top:12px"><button class="btn" id="pa-mod">Modifica articolo / assegna un codice mio</button></div></div>`,'w');closeX(w);
+  $$('[data-ab]',w).forEach(b=>b.onclick=()=>{const p=P[+b.dataset.ab];
+    if(a.codice&&norm(a.codice)!==norm(p.c.codice)&&!confirm('L’articolo ha già il codice «'+a.codice+'». Sostituirlo con «'+p.c.codice+'»?'))return;
+    busy(b,async()=>{await api('api_saveArticolo',{...a,codice:p.c.codice});await loadStock(true);w.remove();lTab();toast('Abbinato: codice '+p.c.codice)})});
+  $('#pa-mod',w).onclick=()=>{w.remove();artForm(a.societa,a)};
+}
+function abbinaBlocco(){
+  const R=artDaInv().map(a=>({a,p:proposte(a,1)[0]})).filter(x=>x.p&&x.p.c.codice&&x.p.s>=.6).sort((x,y)=>y.p.s-x.p.s);
+  if(!R.length){toast('Nessuna proposta con somiglianza ≥ 60%: usa «Proponi abbinamento» sulle singole righe.',true);return}
+  const w=modal(`<div class="mh"><h3>Abbina in blocco · ${R.length} proposte</h3><button class="x">${ic('x')}</button></div><div class="mb">
+    <div class="mut" style="margin-bottom:8px">Sono preselezionate solo le proposte con somiglianza ≥ 85%. Controlla e togli la spunta dove non ti convince.</div>
+    <div class="tw" style="max-height:60vh;overflow:auto"><table><thead><tr><th></th><th>Articolo (inventario)</th><th class="r">%</th><th>Componente del listino</th><th>Codice</th></tr></thead><tbody>${R.map((x,i)=>`<tr><td><input type="checkbox" class="bk" data-i="${i}" ${x.p.s>=.85?'checked':''}></td><td>${esc(x.a.nome)}<div class="mut" style="font-size:12px">${esc(SOC[x.a.societa].nome)}${x.a.codice?' · cod. '+esc(x.a.codice):''}</div></td><td class="r"><b>${pctM(x.p.s)}</b></td><td>${esc(x.p.c.nome)}<div class="mut" style="font-size:12px">${esc(x.p.c.fornitore)}</div></td><td class="nw"><b>${esc(x.p.c.codice)}</b></td></tr>`).join('')}</tbody></table></div></div>
+    <div class="mf"><button class="btn x">Annulla</button><button class="btn p" id="bk-ok">Abbina le righe selezionate</button></div>`,'w');closeX(w);
+  $('#bk-ok',w).onclick=e=>busy(e.currentTarget,async()=>{const sel=$$('.bk:checked',w).map(c=>R[+c.dataset.i]);if(!sel.length)throw new Error('Nessuna riga selezionata.');
+    let ok=0,err=[];for(const x of sel){try{await api('api_saveArticolo',{...x.a,codice:x.p.c.codice});ok++}catch(e){err.push((x.a.nome||'')+': '+e.message)}}
+    await loadStock(true);w.remove();lTab();toast(ok+' articoli abbinati'+(err.length?' · '+err.length+' non abbinati (codice già usato): '+err[0]:''),!!err.length&&!ok)});
 }
 
 /* ---- Carico materiali ---- */
