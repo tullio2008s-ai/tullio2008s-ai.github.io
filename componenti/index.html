@@ -1047,6 +1047,27 @@ function parseVendite(wb){
     if(/^inventario srl/.test(l))par.inventario=v;else if(/^acquisti materiali/.test(l))par.acquistiGenFeb=v;else if(/magazzino consegnato a paysolution/.test(l))par.concordato=v});
   return {righe,par};
 }
+
+function recPS(par,M,mesi,acq){
+  const FP=(par.fatturePS||[]).slice().sort((a,b)=>a.mese.localeCompare(b.mese));if(!FP.length)return '';
+  const ced=par.concordato,sm=(a,f)=>a.reduce((x,r)=>x+f(r),0),tipo=(f,t)=>sm(f.righe.filter(r=>r.t===t),r=>r.i);
+  const rec=sm(FP,f=>tipo(f,'recupero')),mont=sm(FP,f=>tipo(f,'montaggio')),res=ced!=null?ced-rec:null;
+  const rows=FP.map(f=>{const roy=tipo(f,'royalty'),F=roy/0.03,pc=f.mese==='2026-03'?0.45:f.mese<='2026-06'?0.35:null,teo=pc?F*pc:null,r=tipo(f,'recupero');
+    return `<tr><td><b>${meseLbl(f.mese)}</b></td><td class="nw">${esc(f.num)} · ${dmy(f.data)}</td><td class="r nw">${eur(f.imponibile)}</td><td class="r nw">${r?eur(r):'—'}</td><td class="r nw">${tipo(f,'montaggio')?eur(tipo(f,'montaggio')):'—'}</td><td class="r nw mut">${r&&pc?eur(F):'—'}</td><td class="r nw mut">${r&&pc?eur(teo)+' ('+pc*100+'%)':'—'}</td><td class="r nw mut">${r&&pc?eur(Math.max(teo-r,0)):'—'}</td></tr>`}).join('');
+  const dopo=mesi.filter(m=>m>'2026-02'),srlSales=sm(dopo,m=>M[m].mag),srlAcq=sm(dopo,m=>acq[m]||0),pay=sm(dopo,m=>M[m].pay);
+  const teo28=M['2026-02']?M['2026-02'].fine:null;
+  const srl=teo28==null||ced==null?null:teo28-ced-srlSales-mont+srlAcq;
+  const L=(a,b,c)=>`<tr${c?' style="background:#FFF7C2"':''}><td>${a}</td><td class="r nw">${b}</td></tr>`;
+  return `<div class="lbl" style="margin:18px 2px 8px">RICONCILIAZIONE MAGAZZINO SRL ↔ PAYSOLUTION · fatture emesse a Paysolution</div>
+  <div class="card"><div class="tw"><table><thead><tr><th>Mese</th><th>Fattura</th><th class="r">Imponibile</th><th class="r">Recupero magazzino</th><th class="r">Materiali montaggio</th><th class="r" title="Royalty ÷ 3%">F implicito</th><th class="r" title="CM% × F (Allegato C §3, Addendum 35% da aprile)">Quota teorica</th><th class="r" title="Quota teorica − recupero fatturato = acquisti autonomi Paysolution detratti (stima)">Acquisti PS detratti (stima)</th></tr></thead><tbody>${rows}</tbody><tfoot><tr><td colspan="2" class="r"><b>TOTALE</b></td><td class="r nw"><b>${eur(sm(FP,f=>f.imponibile))}</b></td><td class="r nw"><b>${eur(rec)}</b></td><td class="r nw"><b>${eur(mont)}</b></td><td colspan="3"></td></tr></tfoot></table></div></div>
+  <div class="grid" style="margin-top:12px;align-items:start;grid-template-columns:repeat(auto-fit,minmax(340px,1fr))"><div class="card"><div class="pad" style="padding:12px 16px 2px"><b>Credito per il magazzino ceduto</b></div><div class="tw"><table><tbody>
+    ${ced!=null?L('Magazzino ceduto a Paysolution al 01/03 (50.000 € IVA incl.)',eur(ced)):''}${L('Recuperi fatturati (mar–giu)','− '+eur(rec))}${res!=null?L('<b>Ancora da recuperare</b>',eur(res),1):''}
+    ${L('<span class="mut">Merce fornita da Paysolution mar–ott, a costo (solo informativo)</span>','<span class="mut">'+eur(pay)+'</span>')}</tbody></table></div></div>
+  <div class="card"><div class="pad" style="padding:12px 16px 2px"><b>Magazzino teorico SRL dopo la cessione</b></div><div class="tw"><table><tbody>
+    ${teo28!=null?L('Teorico al 28/02',eur(teo28)):''}${ced!=null?L('− Ceduto a Paysolution al 01/03','− '+eur(ced)):''}${L('− Scarichi per vendite SRL mar–ott','− '+eur(srlSales))}${L('− Materiali di montaggio addebitati (FE-00127)','− '+eur(mont))}${L('+ Acquisti SRL mar–ott (colonna Acquisti)','+ '+eur(srlAcq))}
+    ${srl!=null?L('<b>Residuo teorico SRL</b>',eur(srl),1):''}</tbody></table></div></div></div>
+  <p class="mut" style="font-size:13px;margin:8px 2px 4px">Il recupero del magazzino iniziale non segue i consumi: è <b>CM% × fatturato − acquisti autonomi di Paysolution</b> (Allegato C §3: 45% a marzo, 35% da aprile per l'Addendum). Il fatturato è ricavato dalla royalty (3%). Dopo giugno non risultano fatture di recupero.${srl!=null&&srl<0?' Il residuo SRL è <b>negativo</b>: mancano acquisti SRL mar–ott per almeno '+eur(-srl)+' (o il magazzino ceduto/gli scarichi vanno rivisti).':''}</p>`;
+}
 async function rScarichi(){
   head('SCARICHI E ANALISI MENSILE','Tullio Serci srl · magazzino scaricato per le vendite, mese per mese (valore a costo)',
     `<button class="btn" id="sc-imp">${ic('up')}Importa file vendite (.xlsx)</button> <button class="btn" id="sc-csv">${ic('dl')}CSV</button><input type="file" id="sc-file" accept=".xlsx,.xls" class="hide">`);
@@ -1085,6 +1106,7 @@ function drawScarichi(){
   $('#view').innerHTML=`<div class="kpis">${kp(esc(aperturaLbl),eur(apertura))}${kp('Acquisti materiali',eur(totA))}${kp('Scaricato per vendite',eur(-totS))}${kp('Magazzino teorico a fine periodo',eur(fine),1)}</div>
     <div class="card"><div class="tw"><table><thead><tr><th>Mese</th><th class="r">Righe</th><th class="r">Ricavo imponibile</th><th class="r">Scarico magazzino SRL</th><th class="r" title="Merce fornita da Paysolution: non esce dal magazzino SRL">Fornita da Paysolution (a costo)</th><th class="r">Acquisti (manuale)</th><th class="r">Magazzino teorico</th></tr></thead><tbody>${body}</tbody></table></div></div>
     <p class="mut" style="font-size:13px;margin:8px 2px 14px">${esc(par.acquistiNota||'')} Clicca un mese per vedere le righe scaricate. Lo scarico è a <b>valore di costo</b> (prezzo di vendita × coefficiente del file, o costo da distinta dove indicato): il file non contiene i componenti, quindi la giacenza per articolo resta quella delle conte.</p>
+    ${recPS(par,M,mesi,acq)}
     ${mr?`<div class="card"><div class="pad" style="padding:14px 16px 4px"><b>${meseLbl(mr)} · ${det.length} righe scaricate</b></div><div class="tw"><table><thead><tr><th>Data</th><th>Documento</th><th>Cliente</th><th>Codice</th><th>Descrizione</th><th class="r">Q.tà</th><th class="r">Scarico €</th></tr></thead><tbody>${det.map(r=>`<tr><td class="nw">${dmy(r.data)}</td><td class="nw">${esc(r.documento)}</td><td>${esc(r.cliente)}</td><td class="nw">${esc(r.codice)}</td><td>${esc(r.descrizione)}</td><td class="r">${r.qta}</td><td class="r nw">${eur(r.scarico)}</td></tr>`).join('')||'<tr><td colspan="7" class="empty">Nessuno scarico dal magazzino SRL.</td></tr>'}</tbody></table></div></div>`:''}
     <div class="lbl" style="margin:18px 2px 8px">SCARICO PER PRODOTTO (codice negozio) · ${prods.length} prodotti</div>
     <div class="card"><div class="tw"><table><thead><tr><th>Codice</th><th>Descrizione</th><th class="r">Q.tà</th>${mesi.filter(m=>prods.some(p=>p.m[m])).map(m=>`<th class="r">${MESI[+m.slice(5,7)-1].slice(0,3)}</th>`).join('')}<th class="r">Totale €</th></tr></thead><tbody>${prods.map(p=>`<tr><td class="nw">${esc(p.cod)}</td><td>${esc(p.des)}</td><td class="r">${p.q}</td>${mesi.filter(m=>prods.some(x=>x.m[m])).map(m=>`<td class="r nw">${p.m[m]?eur(p.m[m]):''}</td>`).join('')}<td class="r nw"><b>${eur(p.v)}</b></td></tr>`).join('')}</tbody></table></div></div>`;
