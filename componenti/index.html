@@ -299,16 +299,16 @@ async function boot(){
 
 /* ============ Navigazione ============ */
 const TABS=[['step','STEP 1 · Listino'],['listino','Listino componenti','list'],['carica','Carica fatture','up'],['fatture','Fatture caricate','doc'],['trasporti','TRASPORTI','truck'],
-  ['step','STEP 2 · Prodotti'],['distinte','Distinte base','box'],['costi','Costi prodotto','list'],['catalogo','Catalogo prodotti','list'],['step','STOCK · Magazzino'],['invA','Inventario PAYSOLUTION','box'],['invB','Inventario Tullio Serci srl','box'],['scarichi','Scarichi e analisi mensile','truck'],['coeff','Coefficienti mensili','list'],['carico','Carico materiali','up'],['step','Sistema'],['imp','Impostazioni','cog']];
+  ['step','STEP 2 · Prodotti'],['distinte','Distinte base','box'],['costi','Costi prodotto','list'],['catalogo','Catalogo prodotti','list'],['step','STOCK · Magazzino'],['invA','Inventario PAYSOLUTION','box'],['invB','Inventario Tullio Serci srl','box'],['scarichi','Scarichi e analisi mensile','truck'],['coeff','Coefficienti mensili','list'],['consolidato','Consolidato Paysolution','list'],['carico','Carico materiali','up'],['step','Sistema'],['imp','Impostazioni','cog']];
 const STOCK_ONLY=/\/stock\/?(index\.html)?$/.test(location.pathname)||/[?&]stock=1/.test(location.search);
-const STOCK_TABS=['invA','invB','scarichi','coeff','carico'];
+const STOCK_TABS=['invA','invB','scarichi','coeff','consolidato','carico'];
 function render(){
   if(STOCK_ONLY&&!STOCK_TABS.includes(S.tab))S.tab='invA';
   const tl=STOCK_ONLY?TABS.filter(t=>t[0]==='step'?t[1].startsWith('STOCK'):STOCK_TABS.includes(t[0])):TABS;
   const lk=STOCK_ONLY?new URL(/stock\/?(index\.html)?$/.test(location.pathname)?'../componenti/':'index.html',location.href).href:new URL(/componenti\/?(index\.html)?$/.test(location.pathname)?'../stock/':'?stock=1',location.href).href;
   $('#nav').innerHTML=tl.map(t=>t[0]==='step'?`<div class="step">${t[1]}</div>`:`<button data-tab="${t[0]}" class="${S.tab===t[0]?'on':''}">${ic(t[2])}${t[1]}</button>`).join('')+`<a href="${lk}" target="_blank" rel="noopener" style="display:block;margin:14px 12px 0;color:#FFD500;font-size:12.5px;font-weight:700">${STOCK_ONLY?'Apri la consolle costi ↗':'Apri la pagina Stock da sola ↗'}</a>`;
   $$('#nav button').forEach(b=>b.onclick=()=>{S.tab=b.dataset.tab;render()});
-  ({listino:rListino,carica:rCarica,fatture:rFatture,trasporti:rTrasporti,distinte:rDistinte,costi:rCosti,imp:rImp,invA:()=>rInv('PAYSOLUTION'),invB:()=>rInv('TULLIO'),scarichi:rScarichi,coeff:rCoeff,carico:rCarico,catalogo:rCatalogo})[S.tab]();
+  ({listino:rListino,carica:rCarica,fatture:rFatture,trasporti:rTrasporti,distinte:rDistinte,costi:rCosti,imp:rImp,invA:()=>rInv('PAYSOLUTION'),invB:()=>rInv('TULLIO'),scarichi:rScarichi,coeff:rCoeff,consolidato:rConsol,carico:rCarico,catalogo:rCatalogo})[S.tab]();
 }
 function head(t,s,act=''){$('#ttl').textContent=t;$('#sub').textContent=s;$('#topact').innerHTML=act}
 
@@ -1408,6 +1408,68 @@ function abbinaBlocco(){
   $('#bk-ok',w).onclick=e=>busy(e.currentTarget,async()=>{const sel=$$('.bk:checked',w).map(c=>R[+c.dataset.i]);if(!sel.length)throw new Error('Nessuna riga selezionata.');
     let ok=0,err=[];for(const x of sel){try{await api('api_saveArticolo',{...x.a,codice:x.p.c.codice});ok++}catch(e){err.push((x.a.nome||'')+': '+e.message)}}
     await loadStock(true);w.remove();lTab();toast(ok+' articoli abbinati'+(err.length?' · '+err.length+' non abbinati (codice già usato): '+err[0]:''),!!err.length&&!ok)});
+}
+
+/* ---- Consolidato Paysolution: coefficiente anno, ricavi, debito residuo ---- */
+const CONS_DEF={fatturato:{'2026-03':25377.26,'2026-04':38768.55,'2026-05':50352.60,'2026-06':67341.92,'2026-07':47152.44,'2026-08':23671.02,'2026-09':38887.92,'2026-10':36686.09},acquistiPS:163712.96,stockPS:33000,escludiMerceSRL:false};
+async function rConsol(){
+  head('CONSOLIDATO PAYSOLUTION','Coefficiente dell’anno, ricavi, materiali consumati e magazzino non pagato · SRL + Paysolution · IVA esclusa');
+  $('#view').innerHTML='<div class="empty"><span class="spin"></span> Caricamento…</div>';
+  try{await loadStock();S.sc=await api('api_scarichiState')}catch(e){$('#view').innerHTML='<div class="note bad">'+esc(e.message)+'</div>';return}
+  if(S.tab!=='consolidato')return;drawConsol();
+}
+function consCalc(){
+  const sc=S.sc,par=sc.param||{},Mo=modelloSRL(sc,S.stock);if(!Mo)return null;
+  const C={...CONS_DEF,...(par.consolidato||{})};C.fatturato={...CONS_DEF.fatturato,...((par.consolidato||{}).fatturato||{})};
+  const mesi=Mo.mesi,sum=(a,f)=>a.reduce((x,m)=>x+f(m),0),M=Mo.M;
+  const R=righeCorr(sc).filter(r=>r.categoria!=='Esclusa (fattura stornata)');
+  const vend=m=>({mag:sum(R.filter(r=>r.data.slice(0,7)===m&&r.fonte==='Magazzino SRL'),r=>r.imponibile)||0,pay:sum(R.filter(r=>r.data.slice(0,7)===m&&r.fonte==='Fornita da Paysolution'),r=>r.imponibile)||0});
+  const V={};mesi.forEach(m=>V[m]=vend(m));
+  const recM={},monM={};(par.fatturePS||[]).forEach(f=>f.righe.forEach(x=>{if(x.t==='recupero')recM[f.mese]=(recM[f.mese]||0)+x.i;if(x.t==='montaggio')monM[f.mese]=(monM[f.mese]||0)+x.i}));
+  const rec=sum(Object.keys(recM),m=>recM[m]),mon=sum(Object.keys(monM),m=>monM[m]);
+  const F=sum(Object.keys(C.fatturato),m=>Number(C.fatturato[m])||0),srlMag=sum(mesi,m=>V[m].mag),srlPay=sum(mesi,m=>V[m].pay);
+  const ricavi=F+srlMag+(C.escludiMerceSRL?0:srlPay);
+  const acqSRL=sum(mesi,m=>M[m].ing),acqPSext=C.acquistiPS-rec,apertura=Mo.apertura,srlFine=M[mesi[mesi.length-1]].fine;
+  const cons=apertura+acqSRL+acqPSext-C.stockPS-srlFine;
+  const c=ricavi?cons/ricavi:null,quota=c==null?null:c*F-acqPSext,soglia=F?acqPSext/F:null;
+  const usT=sum(mesi,m=>M[m].usT),usM=sum(mesi,m=>M[m].usM),usF=sum(mesi,m=>M[m].usF),usciti=usT+usM,conc=par.concordato;
+  const debFis=usciti+usF-rec-mon,debCon=conc!=null?conc-rec:null;
+  return {par,C,Mo,mesi,M,V,rec,mon,recM,F,srlMag,srlPay,ricavi,acqSRL,acqPSext,apertura,srlFine,cons,c,quota,soglia,usT,usM,usF,usciti,conc,debFis,debCon};
+}
+function drawConsol(){
+  const K=consCalc();
+  if(!K){$('#view').innerHTML='<div class="card pad"><div class="empty">Nessuna vendita caricata: importa prima il file in «Scarichi e analisi mensile».</div></div>';return}
+  const {C,mesi,M,V}=K,kp=(l,v,y,s)=>`<div class="kpi card"><small>${l}</small><b ${y?'style="background:#FFD500;color:#0A0A0A;padding:0 6px;border-radius:6px"':''}>${v}</b>${s?`<div class="mut" style="font-size:11.5px;margin-top:3px">${s}</div>`:''}</div>`;
+  const L=(a,b,h,hi)=>`<tr${h?' style="background:#FFD500;font-weight:800"':hi?' style="background:#FFF7C2"':''}><td>${a}</td><td class="r nw">${b}</td></tr>`;
+  const inp=(k,v,m)=>`<input class="cs" data-k="${k}"${m?` data-m="${m}"`:''} value="${cn(v)}" style="width:110px;text-align:right">`;
+  const salvato=!!(K.par.consolidato);
+  $('#view').innerHTML=`<div class="kpis">${kp('Coefficiente dell’anno',K.c==null?'—':pctS(K.c),1,'materiali consumati ÷ ricavi')}${kp('Ricavi (IVA escl.)',eur(K.ricavi))}${kp('Materiali consumati',eur(K.cons))}${kp('Magazzino SRL non pagato (flusso fisico)',eur(K.debFis),0,K.debCon!=null?'da contratto: '+eur(K.debCon):'')}</div>
+  ${salvato?'':'<div class="note">Valori proposti dai dati forniti nella sessione di lavoro: modificane uno e vengono salvati, oppure <button class="btn sm y" id="cs-save">Salva questi valori</button>.</div>'}
+  <div class="grid" style="align-items:start;grid-template-columns:repeat(auto-fit,minmax(380px,1fr))">
+   <div class="card"><div class="pad" style="padding:12px 16px 2px"><b>Dati di partenza (modificabili)</b></div><div class="tw"><table><tbody>
+    <tr><td>Acquisti diretti Paysolution mar–ott <span class="mut">(incl. quanto pagato all’SRL)</span></td><td class="r">${inp('acquistiPS',C.acquistiPS)}</td></tr>
+    <tr><td>Magazzino reale Paysolution al 31/10</td><td class="r">${inp('stockPS',C.stockPS)}</td></tr>
+    <tr><td>Escludi dai ricavi le vendite SRL con merce Paysolution <span class="mut">(${eur(K.srlPay)}) se già nel fatturato Paysolution</span></td><td class="r"><input type="checkbox" id="cs-esc" ${C.escludiMerceSRL?'checked':''}></td></tr></tbody></table></div></div>
+   <div class="card"><div class="pad" style="padding:12px 16px 2px"><b>Coefficiente dell’anno</b></div><div class="tw"><table><tbody>
+    ${L('Magazzino SRL al 31/12/2025',eur(K.apertura))}${L('+ Acquisti SRL da esterni',eur(K.acqSRL))}${L('+ Acquisti diretti Paysolution da esterni (al netto di '+eur(K.rec)+' pagati all’SRL)',eur(K.acqPSext))}
+    ${L('− Magazzino reale Paysolution','− '+eur(C.stockPS))}${L('− Magazzino SRL a fine periodo','− '+eur(K.srlFine))}${L('= Materiali consumati',eur(K.cons),0,1)}
+    ${L('Fatturato Paysolution',eur(K.F))}${L('+ Vendite gettoniere SRL con merce SRL',eur(K.srlMag))}${L('+ Vendite gettoniere SRL con merce Paysolution',C.escludiMerceSRL?'<span class="mut">escluse</span>':eur(K.srlPay))}
+    ${L('= Ricavi',eur(K.ricavi),0,1)}${L('COEFFICIENTE DELL’ANNO',K.c==null?'—':pctS(K.c),1)}</tbody></table></div></div>
+   <div class="card"><div class="pad" style="padding:12px 16px 2px"><b>Rata di magazzino (formula: coefficiente × fatturato − acquisti)</b></div><div class="tw"><table><tbody>
+    ${L('Fatturato Paysolution × coefficiente',eur(K.c*K.F))}${L('− Acquisti diretti Paysolution','− '+eur(K.acqPSext))}${L('= Rata spettante all’SRL',eur(K.quota),0,1)}
+    ${L('Coefficiente oltre il quale una rata diventa dovuta',pctS(K.soglia))}</tbody></table></div><p class="mut" style="font-size:12.5px;padding:0 16px 12px">La formula stabilisce <b>quando</b> Paysolution paga il magazzino, non se: se la rata è ≤ 0 non è dovuta ora, ma il debito resta.</p></div>
+   <div class="card"><div class="pad" style="padding:12px 16px 2px"><b>Magazzino SRL non ancora pagato (31/10/2026)</b></div><div class="tw"><table><tbody>
+    ${L('Materiali passati a Paysolution (mar–ott, con montaggio)',eur(K.usciti))}${L('+ Residuo SRL venduto a costo il 31/10',eur(K.usF))}${L('− Recupero già fatturato (mar–giu)','− '+eur(K.rec))}${L('− Montaggio già fatturato','− '+eur(K.mon))}
+    ${L('= Non pagato, dal flusso fisico',eur(K.debFis),0,1)}${K.conc!=null?L('Valore dichiarato in contratto',eur(K.conc))+L('− Recupero già fatturato','− '+eur(K.rec))+L('= Non pagato, dal contratto',eur(K.debCon),0,1)+L('Differenza tra le due letture',eur(K.debCon-K.debFis)):''}</tbody></table></div></div></div>
+  <div class="lbl" style="margin:18px 2px 8px">RICAVI E MAGAZZINO MESE PER MESE</div>
+  <div class="card"><div class="tw"><table><thead><tr><th>Mese</th><th class="r">Fatturato Paysolution</th><th class="r">Gettoniere SRL (merce SRL)</th><th class="r">Gettoniere SRL (merce Paysolution)</th><th class="r">Ricavi</th><th class="r">Magazzino SRL a fine mese</th><th class="r">Recupero fatturato</th></tr></thead><tbody>
+  ${mesi.map(m=>{const f=Number(C.fatturato[m])||0,v=V[m];const tot=f+v.mag+(C.escludiMerceSRL?0:v.pay);return `<tr><td><b>${meseLbl(m)}</b></td><td class="r nw">${m>='2026-03'?inp('fatt',f,m):'<span class="mut">—</span>'}</td><td class="r nw">${v.mag?eur(v.mag):'—'}</td><td class="r nw">${v.pay?eur(v.pay):'—'}</td><td class="r nw"><b>${eur(tot)}</b></td><td class="r nw">${eur(M[m].fine)}</td><td class="r nw">${K.recM[m]?eur(K.recM[m]):'—'}</td></tr>`}).join('')}</tbody>
+  <tfoot><tr><td class="r"><b>TOTALE</b></td><td class="r nw"><b>${eur(K.F)}</b></td><td class="r nw"><b>${eur(K.srlMag)}</b></td><td class="r nw"><b>${eur(K.srlPay)}</b></td><td class="r nw"><span class="land">${eur(K.ricavi)}</span></td><td></td><td class="r nw"><b>${eur(K.rec)}</b></td></tr></tfoot></table></div></div>
+  <p class="mut" style="font-size:13px;margin:8px 2px">Le vendite SRL vengono dal file vendite (solo gettoniere: sono escluse le righe «Non è merce» e le fatture stornate). Il fatturato Paysolution è inserito a mano. I valori sono a costo/IVA esclusa. Valutazione formula: nel contratto firmato (art. 17) il magazzino rinvia a un accordo separato.</p>`;
+  const persist=async fn=>{try{const p={...K.par};const cc={...(p.consolidato||{}),fatturato:{...C.fatturato},acquistiPS:C.acquistiPS,stockPS:C.stockPS,escludiMerceSRL:C.escludiMerceSRL};fn(cc);p.consolidato=cc;S.sc.param=await api('api_saveScarichiParam',p);drawConsol()}catch(e){toast(e.message,true)}};
+  $$('#view input.cs').forEach(i=>i.onchange=()=>{const v=num(i.value);if(isNaN(v)||v<0){toast('Valore non valido.',true);drawConsol();return}persist(cc=>{if(i.dataset.k==='fatt')cc.fatturato[i.dataset.m]=v;else cc[i.dataset.k]=v})});
+  $('#cs-esc').onchange=e=>persist(cc=>{cc.escludiMerceSRL=e.target.checked});
+  const sb=$('#cs-save');if(sb)sb.onclick=()=>persist(()=>{});
 }
 
 /* ---- Carico materiali ---- */
