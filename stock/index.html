@@ -299,7 +299,7 @@ async function boot(){
 
 /* ============ Navigazione ============ */
 const TABS=[['step','STEP 1 · Listino'],['listino','Listino componenti','list'],['carica','Carica fatture','up'],['fatture','Fatture caricate','doc'],['trasporti','TRASPORTI','truck'],
-  ['step','STEP 2 · Prodotti'],['distinte','Distinte base','box'],['costi','Costi prodotto','list'],['catalogo','Catalogo prodotti','list'],['step','STOCK · Magazzino'],['invA','Inventario PAYSOLUTION','box'],['invB','Inventario Tullio Serci','box'],['scarichi','Scarichi e analisi mensile','truck'],['coeff','Coefficienti mensili','list'],['carico','Carico materiali','up'],['step','Sistema'],['imp','Impostazioni','cog']];
+  ['step','STEP 2 · Prodotti'],['distinte','Distinte base','box'],['costi','Costi prodotto','list'],['catalogo','Catalogo prodotti','list'],['step','STOCK · Magazzino'],['invA','Inventario PAYSOLUTION','box'],['invB','Inventario Tullio Serci srl','box'],['scarichi','Scarichi e analisi mensile','truck'],['coeff','Coefficienti mensili','list'],['carico','Carico materiali','up'],['step','Sistema'],['imp','Impostazioni','cog']];
 const STOCK_ONLY=/\/stock\/?(index\.html)?$/.test(location.pathname)||/[?&]stock=1/.test(location.search);
 const STOCK_TABS=['invA','invB','scarichi','coeff','carico'];
 function render(){
@@ -801,7 +801,7 @@ function giacMap(soc,asOf){
 }
 const fq=v=>fmt(v,0,3);
 async function rInv(soc){
-  const nome=SOC[soc].nome;
+  const nome=SOC[soc].nome;S.invShow=S.invShow||{};if(!(S.conta&&S.conta.soc===soc))S.invShow[soc]=false;
   head('INVENTARIO '+nome.toUpperCase(),'Stock valorizzato · conte salvate per data · i carichi si registrano in «Carico materiali»',
     `<button class="btn" id="i-imp">${ic('up')}Importa da Excel</button> <button class="btn" id="i-prop">${ic('list')}Proponi codici esistenti</button> <button class="btn" id="i-new">${ic('plus')}Nuovo codice</button> <button class="btn y" id="i-conta">${ic('doc')}Nuova conta</button><input type="file" id="i-file" accept=".xlsx,.xls" class="hide">`);
   $('#view').innerHTML='<div class="empty"><span class="spin"></span> Caricamento stock…</div>';
@@ -816,6 +816,7 @@ async function rInv(soc){
 }
 function startConta(soc,righe){
   if(S.conta&&S.conta.soc!==soc&&!confirm('Hai una conta in corso su un altro inventario: abbandonarla?'))return;
+  (S.invShow=S.invShow||{})[soc]=true;
   const asOf=S.idata[soc]||todayYmd(),G=giacMap(soc,asOf),q={},c={};
   S.stock.articoli.filter(a=>a.societa===soc&&a.attivo!=='NO').forEach(a=>{q[a.id]=String(G[a.id].qta).replace('.',',');c[a.id]=a.costo==null?'':String(a.costo).replace('.',',')});
   if(righe)righe.forEach(r=>{if(q[r.articoloId]!==undefined){q[r.articoloId]=String(r.qta).replace('.',',')}});
@@ -823,7 +824,7 @@ function startConta(soc,righe){
   if(S.tab!==SOC[soc].tab){S.tab=SOC[soc].tab;render()}else drawInv(soc);
 }
 
-function riepilogoMese(asOf){
+function riepilogoMese(asOf,hero){
   const sc=S.sc;if(!sc||!S.stock)return '';const Mo=modelloSRL(sc,S.stock);if(!Mo)return '';
   const m=asOf.slice(0,7),e=Mo.M[m],par=sc.param||{};
   const L=(a,b,h)=>`<tr${h?' style="background:#FFD500;font-size:16px"':''}><td>${a}</td><td class="r nw">${b}</td></tr>`;
@@ -832,11 +833,14 @@ function riepilogoMese(asOf){
   if(e)corpo=`<div class="tw"><table><tbody>${L('Magazzino a inizio mese',eur(e.ap))}${L('+ Ingressi (acquisti materiali)',e.ing?'+ '+eur(e.ing):'—')}${L('− Uscite per vendite SRL',e.usV?'− '+eur(e.usV):'—')}${e.usT?L('− Trasferimento a Paysolution',' − '+eur(e.usT)):''}${e.usM?L('− Materiali di montaggio addebitati a Paysolution','− '+eur(e.usM)):''}${e.usF?L('− Vendita del residuo a Paysolution (31/10)','− '+eur(e.usF)):''}${L('TOTALE magazzino a fine '+meseLbl(m).toLowerCase(),eur(e.fine),1)}</tbody></table></div>`;
   else if(m<Mo.mesi[0])corpo=`<div class="pad mut" style="padding:12px 16px">Prima del ${meseLbl(Mo.mesi[0])} non ci sono scarichi e acquisti caricati: vale l’inventario salvato${Mo.inv?' al '+dmy(Mo.inv.data)+' ('+eur(Mo.apertura)+')':''}.</div>`;
   else corpo=`<div class="pad mut" style="padding:12px 16px">Dopo ${meseLbl(Mo.mesi[Mo.mesi.length-1])} non risultano movimenti: il magazzino resta ${eur(Mo.M[Mo.mesi[Mo.mesi.length-1]].fine)}.</div>`;
-  return `<div class="card" style="margin-bottom:12px"><div class="pad" style="padding:12px 16px 2px"><b>RIEPILOGO DEL MESE · ${meseLbl(m)}</b> <button class="btn sm y noprint" id="r-pdf" style="margin:0 8px">${ic('dl')}Scarica report fine mese (PDF)</button> <span class="mut" style="font-size:12.5px">valore a costo teorico: inventario ${Mo.inv?dmy(Mo.inv.data):'31/12/2025'} + acquisti − scarichi − trasferimenti</span></div>${corpo}
-    <details style="padding:6px 16px 12px"><summary class="mut" style="cursor:pointer">Tutti i mesi</summary><div class="tw"><table><thead><tr><th>Mese</th><th class="r">Inizio mese</th><th class="r">Ingressi</th><th class="r">Uscite</th><th class="r">Fine mese</th></tr></thead><tbody>${mesiTab}</tbody></table></div></details></div>`;
+  const kp=(l,v,y)=>`<div class="kpi card"><small>${l}</small><b ${y?'style="background:#FFD500;color:#0A0A0A;padding:0 6px;border-radius:6px"':''}>${v}</b></div>`;
+  const tiles=hero&&e?`<div class="kpis" style="margin-bottom:12px">${kp('Magazzino a inizio '+meseLbl(m).toLowerCase(),eur(e.ap))}${kp('Ingressi (acquisti)',e.ing?'+ '+eur(e.ing):'—')}${kp('Uscite (vendite, trasferimenti)',(e.usV+e.usT+e.usM+e.usF)?'− '+eur(e.usV+e.usT+e.usM+e.usF):'—')}${kp('MAGAZZINO A FINE MESE',eur(e.fine),1)}</div>`:'';
+  return tiles+`<div class="card" style="margin-bottom:12px"><div class="pad" style="padding:12px 16px 2px"><b>RIEPILOGO DEL MESE · ${meseLbl(m)}</b> <button class="btn sm y noprint" id="r-pdf" style="margin:0 8px">${ic('dl')}Scarica report fine mese (PDF)</button> <span class="mut" style="font-size:12.5px">valore a costo teorico: inventario ${Mo.inv?dmy(Mo.inv.data):'31/12/2025'} + acquisti − scarichi − trasferimenti</span></div>${corpo}
+    <details ${hero?'open ':''}style="padding:6px 16px 12px"><summary class="mut" style="cursor:pointer">Tutti i mesi (clicca un mese per spostarti)</summary><div class="tw"><table><thead><tr><th>Mese</th><th class="r">Inizio mese</th><th class="r">Ingressi</th><th class="r">Uscite</th><th class="r">Fine mese</th></tr></thead><tbody>${mesiTab}</tbody></table></div></details></div>`;
 }
 function drawInv(soc){
   const asOf=S.idata[soc]||todayYmd(),st=S.stock,G=giacMap(soc,asOf),cn_=S.conta&&S.conta.soc===soc?S.conta:null;
+  const Mo=soc==='TULLIO'&&S.sc?modelloSRL(S.sc,st):null,hero=!!Mo&&!cn_&&!(S.invShow&&S.invShow[soc]),analTM=!!Mo&&!hero;
   const baseI=baseSnap(soc,asOf),exact=!!baseI&&baseI.data===asOf,cu=a=>exact&&G[a.id].costo!=null?G[a.id].costo:(a.costo==null?null:Number(a.costo));
   const arts=st.articoli.filter(a=>a.societa===soc&&a.attivo!=='NO');
   const tt=norm(S.iq||'').split(' ').filter(Boolean);
@@ -858,10 +862,12 @@ function drawInv(soc){
     :`Nessuna conta salvata fino al ${dmy(asOf)}: giacenza = somma dei carichi/scarichi registrati (<b style="color:var(--ink)">${nMov}</b>). Con «Nuova conta» fissi l'inventario a una data.`;
   const dRef=`<div class="card" style="padding:14px 18px;margin-bottom:12px;display:flex;gap:18px;align-items:center;flex-wrap:wrap;border:2px solid #0A0A0A">
     <div><label class="f" style="margin:0"><span style="text-transform:uppercase;letter-spacing:.4px">Data inventario</span><input type="date" id="i-date" value="${esc(asOf)}" max="${todayYmd()}" style="font-size:20px;font-weight:900;margin-top:2px;background:#FFD500;color:#0A0A0A;border-color:#0A0A0A"></label></div>
-    <div class="mut dRefTxt" style="flex:1;min-width:240px">${spiega}${asOf!==todayYmd()?` <a href="#" id="i-oggi">Torna a oggi</a>`:''}</div>
-    ${invs.length?`<label class="f" style="margin:0">Salvati: vai alla data<select id="i-dsel"><option value="">— scegli —</option>${invs.map(i=>`<option value="${i.data}" ${i.data===asOf?'selected':''}>${dmy(i.data)} · ${esc(i.nome||'')}</option>`).join('')}</select></label>`:''}</div>`;
-  $('#view').innerHTML=`${dRef}
-  ${soc==='TULLIO'?riepilogoMese(asOf):''}
+    <div class="mut dRefTxt" style="flex:1;min-width:240px">${hero?'Magazzino di Tullio Serci srl calcolato <b style="color:var(--ink)">a valore</b> alla data scelta: inventario '+(Mo.inv?dmy(Mo.inv.data):'31/12/2025')+' + acquisti − scarichi per vendite − trasferimenti a Paysolution. Cambia la data per vedere un altro mese.':spiega}${asOf!==todayYmd()?` <a href="#" id="i-oggi">Torna a oggi</a>`:''}</div>
+    ${invs.length&&!hero?`<label class="f" style="margin:0">Salvati: vai alla data<select id="i-dsel"><option value="">— scegli —</option>${invs.map(i=>`<option value="${i.data}" ${i.data===asOf?'selected':''}>${dmy(i.data)} · ${esc(i.nome||'')}</option>`).join('')}</select></label>`:''}</div>`;
+  const SAVED=`<div class="sec"><span>Inventari salvati per data</span></div>
+  <div class="card tw">${invs.length?`<table><thead><tr><th>Data</th><th>Nome</th><th class="r">Articoli</th><th class="r">Valore stock</th><th>File</th><th></th></tr></thead><tbody>${invs.map(i=>`<tr><td class="nw"><b>${dmy(i.data)}</b></td><td>${esc(i.nome)}</td><td class="r">${i.nRighe}</td><td class="r nw"><span class="land">${eur(i.valore)}</span></td><td>${i.fileUrl?`<a href="${esc(i.fileUrl)}" target="_blank" rel="noopener">CSV su Drive</a>`:'<span class="mut">—</span>'}</td>
+    <td class="nw r"><button class="btn sm" data-op="${i.id}">Apri</button> <button class="btn sm y" data-nx="${i.id}">Nuova conta da questa</button>${S.me.ruolo==='admin'?` <button class="btn sm d" data-dl="${i.id}">${ic('trash')}</button>`:''}</td></tr>`).join('')}</tbody></table>`:'<div class="empty">Nessuna conta salvata: fai la prima con «Nuova conta».</div>'}</div>`;
+  const FULL=`
   <div class="kpis">${kp('Articoli',arts.length)}${kp('Materie prime',eur(V.materia))}${kp('Semilavorati',eur(V.semilavorato))}${kp('Prodotti finiti',eur(V.finito))}${kp('Attrezzature',eur(V.attrezzatura))}${kp('VALORE STOCK',eur(V.materia+V.semilavorato+V.finito+V.attrezzatura),1)}${kp('Ultima conta',last?dmy(last.data):'—')}</div>
   ${cn_?`<div class="note" style="display:flex;gap:12px;flex-wrap:wrap;align-items:center"><b>CONTA IN CORSO</b><label class="f" style="margin:0">Data inventario<input type="date" id="c-dat" value="${esc(cn_.data)}"></label><label class="f" style="margin:0;flex:1;min-width:180px">Nome<input id="c-nom" value="${esc(cn_.nome)}"></label>
     <span class="mut" style="flex-basis:100%">Le quantità sono precompilate con la giacenza teorica (ultima conta + carichi): correggile con il conteggio reale e ritocca i costi se serve. Alla conferma la conta viene salvata con la data e diventa la nuova base.</span>
@@ -873,15 +879,20 @@ function drawInv(soc){
     <button class="btn" id="i-csv">${ic('dl')}CSV</button><button class="btn" id="i-xls">${ic('dl')}Excel</button><button class="btn y" id="i-pdf">${ic('dl')}PDF</button></div>
   <div class="card tw">${list.length?`<table><thead><tr><th>Codice</th><th>Descrizione</th><th>Categoria</th><th>Tipo</th><th>U.M.</th>${cn_?'<th class="r">Teorica</th><th class="r">Conta</th><th class="r">Diff.</th><th class="r">Costo €</th><th class="r">Valore €</th>':'<th class="r">Costo unit. €</th><th class="r">Giacenza</th><th class="r">Valore €</th><th>Ult. mov.</th>'}</tr></thead><tbody>${list.map(row).join('')}</tbody>${cn_?'<tfoot><tr><td colspan="9" class="r"><b>TOTALE CONTA</b></td><td class="r nw" id="c-tot"></td></tr></tfoot>':''}</table>`
     :`<div class="empty">${arts.length?'Nessun articolo corrisponde alla ricerca.':'Inventario vuoto: usa «Proponi codici esistenti» per partire dai codici del listino e delle distinte, oppure «Nuovo codice».'}</div>`}</div>
-  <div class="sec"><span>Inventari salvati per data</span></div>
-  <div class="card tw">${invs.length?`<table><thead><tr><th>Data</th><th>Nome</th><th class="r">Articoli</th><th class="r">Valore stock</th><th>File</th><th></th></tr></thead><tbody>${invs.map(i=>`<tr><td class="nw"><b>${dmy(i.data)}</b></td><td>${esc(i.nome)}</td><td class="r">${i.nRighe}</td><td class="r nw"><span class="land">${eur(i.valore)}</span></td><td>${i.fileUrl?`<a href="${esc(i.fileUrl)}" target="_blank" rel="noopener">CSV su Drive</a>`:'<span class="mut">—</span>'}</td>
-    <td class="nw r"><button class="btn sm" data-op="${i.id}">Apri</button> <button class="btn sm y" data-nx="${i.id}">Nuova conta da questa</button>${S.me.ruolo==='admin'?` <button class="btn sm d" data-dl="${i.id}">${ic('trash')}</button>`:''}</td></tr>`).join('')}</tbody></table>`:'<div class="empty">Nessuna conta salvata: fai la prima con «Nuova conta».</div>'}</div>`;
+  ${SAVED}`;
+  const anal=hero?`<div class="card" style="padding:14px 18px;margin:0 0 12px"><div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap"><div style="flex:1;min-width:260px"><b>Inventario per articolo</b><div class="mut" style="font-size:13px;margin-top:3px">L’elenco articoli è fermo all’ultima conta${Mo.inv?' ('+dmy(Mo.inv.data)+', valore '+eur(Mo.apertura)+')':''}: dal 2026 il magazzino si muove <b style="color:var(--ink)">a valore</b> (acquisti e scarichi mensili), quindi gli articoli non riflettono le vendite 2026. Aprilo solo per consultare una conta.</div></div>
+    ${invs.length?`<label class="f" style="margin:0">Mostra inventario al<select id="i-show"><option value="">— scegli un inventario registrato —</option>${invs.map(i=>`<option value="${i.data}">${dmy(i.data)} · ${esc(i.nome||'')} · ${eur(i.valore)}</option>`).join('')}</select></label>`:''}
+    <button class="btn" id="i-showbtn">Mostra articoli calcolati al ${dmy(asOf)}</button></div></div>`:'';
+  const banner=analTM?`<div class="note" style="display:flex;gap:12px;flex-wrap:wrap;align-items:center"><span>Stai guardando l’<b>inventario per articolo</b> al ${dmy(asOf)} (valore ${eur(V.materia+V.semilavorato+V.finito+V.attrezzatura)}). Non include gli scarichi 2026.</span><button class="btn sm y" id="i-back">← Torna alla situazione del magazzino</button></div>`:'';
+  $('#view').innerHTML=hero?`${dRef}${riepilogoMese(asOf,true)}${anal}${SAVED}`:`${dRef}${banner}${FULL}`;
+
   $('#view').oninput=null;
   $$('#view tr.mclk').forEach(t=>t.onclick=()=>{const k=t.dataset.m,end=k+'-'+String(new Date(+k.slice(0,4),+k.slice(5,7),0).getDate()).padStart(2,'0');goDate(end>todayYmd()?todayYmd():end)});
   const goDate=async v=>{if(!v||v>todayYmd())return;S.idata[soc]=v;try{await ensureSnap(soc,v)}catch(e){toast(e.message,true)}drawInv(soc)};
   const ds=$('#i-dsel');if(ds)ds.onchange=e=>goDate(e.target.value);
   const di=$('#i-date');if(di)di.onchange=e=>goDate(e.target.value);
   const og=$('#i-oggi');if(og)og.onclick=e=>{e.preventDefault();goDate(todayYmd())};
+  if(!hero){
   $('#i-q').oninput=e=>{S.iq=e.target.value;drawInv(soc);const i=$('#i-q');i.focus();i.setSelectionRange(i.value.length,i.value.length)};
   $('#i-t').onchange=e=>{S.itipo=e.target.value;drawInv(soc)};
   $('#i-c').onchange=e=>{S.icat=e.target.value;drawInv(soc)};
@@ -890,8 +901,12 @@ function drawInv(soc){
   $('#i-csv').onclick=()=>csv(exp().map((r,i)=>i?r.map((v,j)=>j>=6&&v!==''?cn(v):v):r),'stock_'+soc+'_'+asOf+'.csv');
   $('#i-xls').onclick=()=>xl(exp(),'Stock '+SOC[soc].nome+' '+asOf+'.xlsx');
   $('#i-pdf').onclick=()=>pdfInv(soc,asOf,list,cu,G,byCat,V,$('#view .dRefTxt')?$('#view .dRefTxt').textContent.replace('Torna a oggi','').trim():'');
-  const rp=$('#r-pdf');if(rp)rp.onclick=()=>pdfFineMese(asOf);
   if(!cn_){$$('#view tr.click').forEach(r=>r.onclick=()=>artForm(soc,st.articoli.find(a=>a.id===r.dataset.id)))}
+  }
+  const rp=$('#r-pdf');if(rp)rp.onclick=()=>pdfFineMese(asOf);
+  const sh=$('#i-show');if(sh)sh.onchange=e=>{if(!e.target.value)return;S.invShow[soc]=true;goDate(e.target.value)};
+  const sb=$('#i-showbtn');if(sb)sb.onclick=()=>{S.invShow[soc]=true;drawInv(soc)};
+  const bk=$('#i-back');if(bk)bk.onclick=()=>{S.invShow[soc]=false;drawInv(soc)};
   $$('#view [data-op]').forEach(b=>b.onclick=()=>openInv(soc,b.dataset.op));
   $$('#view [data-nx]').forEach(b=>b.onclick=()=>busy(b,async()=>{const r=await api('api_inventarioRighe',b.dataset.nx);startConta(soc,r)}));
   $$('#view [data-dl]').forEach(b=>b.onclick=()=>{const i=invs.find(x=>x.id===b.dataset.dl);if(!confirm('Eliminare l’inventario del '+dmy(i.data)+'? (la giacenza tornerà a basarsi sulla conta precedente)'))return;busy(b,async()=>{await api('api_deleteInventario',i.id);delete S.snaps[i.id];await loadStock(true);try{await ensureSnap(soc,S.idata[soc]||todayYmd())}catch(e){}drawInv(soc);toast('Inventario eliminato.')})});
@@ -908,7 +923,7 @@ function drawInv(soc){
       if(!righe.length)throw new Error('Inserisci almeno una quantità.');
       if(righe.some(r=>r.qta<0))throw new Error('Quantità negativa non ammessa.');
       let r;try{r=await api('api_saveInventario',soc,cn_.data,cn_.nome,'',righe,false)}catch(err){if(/^ESISTE/.test(err.message)&&confirm(err.message.replace('ESISTE: ','')+'\n\nSostituirlo con questa conta?'))r=await api('api_saveInventario',soc,cn_.data,cn_.nome,'',righe,true);else throw err}
-      S.conta=null;S.idata[soc]=cn_.data;await loadStock(true);try{await ensureSnap(soc,cn_.data)}catch(e){}drawInv(soc);toast('Inventario salvato: '+r.nRighe+' articoli, valore '+eur(r.valore)+(r.fileUrl?' · copia CSV su Drive':''))});
+      S.conta=null;S.invShow[soc]=true;S.idata[soc]=cn_.data;await loadStock(true);try{await ensureSnap(soc,cn_.data)}catch(e){}drawInv(soc);toast('Inventario salvato: '+r.nRighe+' articoli, valore '+eur(r.valore)+(r.fileUrl?' · copia CSV su Drive':''))});
   }
 }
 async function openInv(soc,id){
@@ -1044,7 +1059,7 @@ function invImport(soc,wb,fname){
     const righe=[];const mancanti=[];items.forEach(i=>{const a=i.codice?byC[i.codice.toLowerCase()]:byK[norm(i.nome)+'|'+norm(i.categoria)+'|'+norm(i.sottocategoria)];if(a)righe.push({articoloId:a.id,qta:i.q,costo:i.costo});else mancanti.push(i.nome)});
     if(mancanti.length)throw new Error('Articoli non abbinati: '+mancanti.slice(0,5).join(', '));
     let r;try{r=await api('api_saveInventario',soc,data,P.nome,'Importato da '+fname,righe,false)}catch(err){if(/^ESISTE/.test(err.message)&&confirm(err.message.replace('ESISTE: ','')+'\n\nSostituirlo con questo?'))r=await api('api_saveInventario',soc,data,P.nome,'Importato da '+fname,righe,true);else throw err}
-    w.remove();S.idata[soc]=data;await loadStock(true);try{await ensureSnap(soc,data)}catch(x){}if(S.tab===SOC[soc].tab)drawInv(soc);
+    w.remove();(S.invShow=S.invShow||{})[soc]=true;S.idata[soc]=data;await loadStock(true);try{await ensureSnap(soc,data)}catch(x){}if(S.tab===SOC[soc].tab)drawInv(soc);
     toast('Inventario importato: '+cr.creati+' articoli creati'+(cr.saltati?' ('+cr.saltati+' già presenti)':'')+', '+r.nRighe+' righe, valore '+eur(r.valore)+'.')});
 }
 
