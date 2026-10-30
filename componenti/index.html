@@ -297,16 +297,16 @@ async function boot(){
 
 /* ============ Navigazione ============ */
 const TABS=[['step','STEP 1 · Listino'],['listino','Listino componenti','list'],['carica','Carica fatture','up'],['fatture','Fatture caricate','doc'],['trasporti','TRASPORTI','truck'],
-  ['step','STEP 2 · Prodotti'],['distinte','Distinte base','box'],['costi','Costi prodotto','list'],['catalogo','Catalogo prodotti','list'],['step','STOCK · Magazzino'],['invA','Inventario PAYSOLUTION','box'],['invB','Inventario Tullio Serci','box'],['carico','Carico materiali','up'],['step','Sistema'],['imp','Impostazioni','cog']];
+  ['step','STEP 2 · Prodotti'],['distinte','Distinte base','box'],['costi','Costi prodotto','list'],['catalogo','Catalogo prodotti','list'],['step','STOCK · Magazzino'],['invA','Inventario PAYSOLUTION','box'],['invB','Inventario Tullio Serci','box'],['scarichi','Scarichi e analisi mensile','truck'],['carico','Carico materiali','up'],['step','Sistema'],['imp','Impostazioni','cog']];
 const STOCK_ONLY=/\/stock\/?(index\.html)?$/.test(location.pathname)||/[?&]stock=1/.test(location.search);
-const STOCK_TABS=['invA','invB','carico'];
+const STOCK_TABS=['invA','invB','scarichi','carico'];
 function render(){
   if(STOCK_ONLY&&!STOCK_TABS.includes(S.tab))S.tab='invA';
   const tl=STOCK_ONLY?TABS.filter(t=>t[0]==='step'?t[1].startsWith('STOCK'):STOCK_TABS.includes(t[0])):TABS;
   const lk=STOCK_ONLY?new URL(/stock\/?(index\.html)?$/.test(location.pathname)?'../componenti/':'index.html',location.href).href:new URL(/componenti\/?(index\.html)?$/.test(location.pathname)?'../stock/':'?stock=1',location.href).href;
   $('#nav').innerHTML=tl.map(t=>t[0]==='step'?`<div class="step">${t[1]}</div>`:`<button data-tab="${t[0]}" class="${S.tab===t[0]?'on':''}">${ic(t[2])}${t[1]}</button>`).join('')+`<a href="${lk}" target="_blank" rel="noopener" style="display:block;margin:14px 12px 0;color:#FFD500;font-size:12.5px;font-weight:700">${STOCK_ONLY?'Apri la consolle costi ↗':'Apri la pagina Stock da sola ↗'}</a>`;
   $$('#nav button').forEach(b=>b.onclick=()=>{S.tab=b.dataset.tab;render()});
-  ({listino:rListino,carica:rCarica,fatture:rFatture,trasporti:rTrasporti,distinte:rDistinte,costi:rCosti,imp:rImp,invA:()=>rInv('PAYSOLUTION'),invB:()=>rInv('TULLIO'),carico:rCarico,catalogo:rCatalogo})[S.tab]();
+  ({listino:rListino,carica:rCarica,fatture:rFatture,trasporti:rTrasporti,distinte:rDistinte,costi:rCosti,imp:rImp,invA:()=>rInv('PAYSOLUTION'),invB:()=>rInv('TULLIO'),scarichi:rScarichi,carico:rCarico,catalogo:rCatalogo})[S.tab]();
 }
 function head(t,s,act=''){$('#ttl').textContent=t;$('#sub').textContent=s;$('#topact').innerHTML=act}
 
@@ -1026,6 +1026,72 @@ function invImport(soc,wb,fname){
     let r;try{r=await api('api_saveInventario',soc,data,P.nome,'Importato da '+fname,righe,false)}catch(err){if(/^ESISTE/.test(err.message)&&confirm(err.message.replace('ESISTE: ','')+'\n\nSostituirlo con questo?'))r=await api('api_saveInventario',soc,data,P.nome,'Importato da '+fname,righe,true);else throw err}
     w.remove();S.idata[soc]=data;await loadStock(true);try{await ensureSnap(soc,data)}catch(x){}if(S.tab===SOC[soc].tab)drawInv(soc);
     toast('Inventario importato: '+cr.creati+' articoli creati'+(cr.saltati?' ('+cr.saltati+' già presenti)':'')+', '+r.nRighe+' righe, valore '+eur(r.valore)+'.')});
+}
+
+
+/* ---- Scarichi magazzino SRL per vendite 2026 + analisi mensile ---- */
+const MESI=['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
+const meseLbl=m=>MESI[+m.slice(5,7)-1]+' '+m.slice(0,4);
+function parseVendite(wb){
+  const nm=wb.SheetNames.find(n=>/^righe$/i.test(n.trim()));if(!nm)throw new Error('Manca il foglio «Righe».');
+  const aoa=XLSX.utils.sheet_to_json(wb.Sheets[nm],{header:1,defval:'',raw:true}),H=aoa[0].map(c=>String(c).trim().toUpperCase()),ix=k=>H.findIndex(h=>h.startsWith(k));
+  const C={d:ix('DATA'),doc:ix('DOCUMENTO'),cli:ix('CLIENTE'),pa:ix('PAESE'),cod:ix('CODICE'),des:ix('DESCRIZIONE'),q:ix('Q.TÀ'),imp:ix('IMPONIBILE'),cat:ix('CATEGORIA'),fon:ix('FONTE'),cu:ix('COSTO UNITARIO'),co:ix('COEFFICIENTE'),cm:ix('COSTO MATERIALE'),sc:ix('DA SCARICARE'),no:ix('NOTA')};
+  if(C.d<0||C.sc<0||C.fon<0)throw new Error('Colonne attese non trovate (Data, Fonte merce, Da scaricare dal magazzino).');
+  const T=v=>String(v==null?'':v).trim(),N=v=>{const x=typeof v==='number'?v:num(v);return isNaN(x)?0:x};
+  const ymd=v=>{if(typeof v==='number'){const d=new Date(Math.round((v-25569)*86400000));return d.toISOString().slice(0,10)}const m=T(v).match(/(\d{4})-(\d{2})-(\d{2})/);return m?m[0]:''};
+  const righe=[];for(let k=1;k<aoa.length;k++){const r=aoa[k],d=ymd(r[C.d]);if(!d)continue;
+    righe.push({data:d,documento:T(r[C.doc]),cliente:T(r[C.cli]),paese:T(r[C.pa]),codice:T(r[C.cod]),descrizione:T(r[C.des]),qta:N(r[C.q]),imponibile:N(r[C.imp]),categoria:T(r[C.cat]),fonte:T(r[C.fon]),
+      costoUnit:C.cu>=0&&T(r[C.cu])!==''?N(r[C.cu]):'',coeff:N(r[C.co]),costo:N(r[C.cm]),scarico:N(r[C.sc]),nota:T(r[C.no])})}
+  const par={},pn=wb.SheetNames.find(n=>/^parametri$/i.test(n.trim()));
+  if(pn)XLSX.utils.sheet_to_json(wb.Sheets[pn],{header:1,defval:''}).forEach(r=>{const l=String(r[0]).toLowerCase(),v=r[1];if(typeof v!=='number')return;
+    if(/^inventario srl/.test(l))par.inventario=v;else if(/^acquisti materiali/.test(l))par.acquistiGenFeb=v;else if(/magazzino consegnato a paysolution/.test(l))par.concordato=v});
+  return {righe,par};
+}
+async function rScarichi(){
+  head('SCARICHI E ANALISI MENSILE','Tullio Serci srl · magazzino scaricato per le vendite, mese per mese (valore a costo)',
+    `<button class="btn" id="sc-imp">${ic('up')}Importa file vendite (.xlsx)</button> <button class="btn" id="sc-csv">${ic('dl')}CSV</button><input type="file" id="sc-file" accept=".xlsx,.xls" class="hide">`);
+  $('#view').innerHTML='<div class="empty"><span class="spin"></span> Caricamento…</div>';
+  try{await loadStock();S.sc=await api('api_scarichiState')}catch(e){$('#view').innerHTML='<div class="note bad">'+esc(e.message)+'</div>';return}
+  if(S.tab!=='scarichi')return;
+  $('#sc-imp').onclick=()=>$('#sc-file').click();
+  $('#sc-file').onchange=async e=>{const f=e.target.files[0];e.target.value='';if(!f)return;
+    try{const P=parseVendite(XLSX.read(await f.arrayBuffer(),{type:'array'}));if(!P.righe.length)throw new Error('Nessuna riga valida.');
+      const tot=P.righe.reduce((x,r)=>x+r.scarico,0),n=P.righe.filter(r=>r.scarico>0).length;
+      if(!confirm('Importare '+P.righe.length+' righe di vendita ('+n+' con scarico dal magazzino SRL, totale '+eur(tot)+')?\nLe righe già presenti di Tullio Serci srl vengono sostituite da questo file.'))return;
+      const par={};if(P.par.inventario!=null)par.inventario=P.par.inventario;if(P.par.concordato!=null)par.concordato=P.par.concordato;
+      if(P.par.acquistiGenFeb!=null){par.acquisti=Object.assign({},(S.sc.param||{}).acquisti,{'2026-02':P.par.acquistiGenFeb});par.acquistiNota='Il file indica 12.859,57 € per gen–feb come totale del periodo: attribuiti a febbraio'}
+      const r=await api('api_importaScarichi','TULLIO',P.righe,par,f.name);toast('Importate '+r.righe+' righe · scarico '+eur(r.scarico));rScarichi()}catch(err){toast(err.message,true)}};
+  drawScarichi();
+}
+function drawScarichi(){
+  const sc=S.sc,R=sc.righe,par=sc.param||{},st=S.stock;
+  if(!R.length){$('#view').innerHTML='<div class="card pad"><div class="empty">Nessuna vendita caricata.<br>Clicca <b>Importa file vendite (.xlsx)</b> e scegli il file «Gettoniere vendute … per modello» (foglio <b>Righe</b>).</div></div>';$('#sc-csv').onclick=()=>{};return}
+  const inv=st.inventari.filter(i=>i.societa==='TULLIO'&&i.data<='2025-12-31').sort((a,b)=>b.data.localeCompare(a.data))[0];
+  const apertura=inv?inv.valore:par.inventario||0,aperturaLbl=inv?'Inventario salvato al '+dmy(inv.data):'Inventario al 31/12/2025 (dal file)';
+  const mesi=[...new Set(R.map(r=>r.data.slice(0,7)))].sort(),acq={...(par.acquisti||{})};
+  st.movimenti.filter(x=>x.societa==='TULLIO'&&x.tipo!=='scarico'&&x.data>'2025-12-31').forEach(x=>{const m=x.data.slice(0,7);acq[m]=(acq[m]||0)+(Number(x.qta)||0)*(Number(x.costo)||0)});
+  [...Object.keys(acq)].forEach(m=>{if(!mesi.includes(m))mesi.push(m)});mesi.sort();
+  const sum=(a,f)=>a.reduce((x,r)=>x+f(r),0),M={};mesi.forEach(m=>{const rr=R.filter(r=>r.data.slice(0,7)===m),mag=rr.filter(r=>r.fonte==='Magazzino SRL');
+    M[m]={n:rr.length,ric:sum(rr.filter(r=>r.categoria!=='Esclusa (fattura stornata)'),r=>r.imponibile),mag:sum(mag,r=>r.scarico),pay:sum(rr.filter(r=>r.fonte==='Fornita da Paysolution'),r=>r.costo),acq:acq[m]||0}});
+  let run=apertura;mesi.forEach(m=>{run=run+M[m].acq-M[m].mag;M[m].fine=run});
+  const totS=sum(mesi,m=>M[m].mag),totA=sum(mesi,m=>M[m].acq),fine=run;
+  const kp=(l,v,y)=>`<div class="kpi card"><small>${l}</small><b ${y?'style="background:#FFD500;color:#0A0A0A;padding:0 6px;border-radius:6px"':''}>${v}</b></div>`;
+  const mr=S.scm&&M[S.scm]?S.scm:'';
+  const mrow=m=>`<tr class="clk" data-m="${m}" style="cursor:pointer${mr===m?';background:#FFF7C2':''}"><td><b>${meseLbl(m)}</b></td><td class="r">${M[m].n}</td><td class="r nw">${eur(M[m].ric)}</td><td class="r nw"><b>${eur(-M[m].mag)}</b></td><td class="r nw mut">${eur(M[m].pay)}</td><td class="r nw"><input class="acq" data-m="${m}" value="${(par.acquisti||{})[m]?cn(par.acquisti[m]):''}" placeholder="0" style="width:96px;text-align:right"></td><td class="r nw"><b>${eur(M[m].fine)}</b></td></tr>`;
+  let body='';mesi.forEach(m=>{body+=mrow(m);if(m==='2026-02'&&par.concordato!=null)body+=`<tr style="background:#FFF7C2"><td colspan="6"><b>Magazzino teorico al 28/02</b> ${eur(M[m].fine)} · valore concordato con Paysolution al 01/03 <b>${eur(par.concordato)}</b> · differenza <b>${eur(M[m].fine-par.concordato)}</b></td><td></td></tr>`});
+  const det=mr?R.filter(r=>r.data.slice(0,7)===mr&&r.scarico>0).sort((a,b)=>a.data.localeCompare(b.data)):[];
+  const byP={};R.filter(r=>r.fonte==='Magazzino SRL'&&r.scarico>0).forEach(r=>{const k=r.codice||r.descrizione,e=byP[k]||(byP[k]={cod:r.codice,des:r.descrizione,q:0,v:0,m:{}});e.q+=r.qta;e.v+=r.scarico;const m=r.data.slice(0,7);e.m[m]=(e.m[m]||0)+r.scarico});
+  const prods=Object.values(byP).sort((a,b)=>b.v-a.v);
+  $('#view').innerHTML=`<div class="kpis">${kp(esc(aperturaLbl),eur(apertura))}${kp('Acquisti materiali',eur(totA))}${kp('Scaricato per vendite',eur(-totS))}${kp('Magazzino teorico a fine periodo',eur(fine),1)}</div>
+    <div class="card"><div class="tw"><table><thead><tr><th>Mese</th><th class="r">Righe</th><th class="r">Ricavo imponibile</th><th class="r">Scarico magazzino SRL</th><th class="r" title="Merce fornita da Paysolution: non esce dal magazzino SRL">Fornita da Paysolution (a costo)</th><th class="r">Acquisti (manuale)</th><th class="r">Magazzino teorico</th></tr></thead><tbody>${body}</tbody></table></div></div>
+    <p class="mut" style="font-size:13px;margin:8px 2px 14px">${esc(par.acquistiNota||'')} Clicca un mese per vedere le righe scaricate. Lo scarico è a <b>valore di costo</b> (prezzo di vendita × coefficiente del file, o costo da distinta dove indicato): il file non contiene i componenti, quindi la giacenza per articolo resta quella delle conte.</p>
+    ${mr?`<div class="card"><div class="pad" style="padding:14px 16px 4px"><b>${meseLbl(mr)} · ${det.length} righe scaricate</b></div><div class="tw"><table><thead><tr><th>Data</th><th>Documento</th><th>Cliente</th><th>Codice</th><th>Descrizione</th><th class="r">Q.tà</th><th class="r">Scarico €</th></tr></thead><tbody>${det.map(r=>`<tr><td class="nw">${dmy(r.data)}</td><td class="nw">${esc(r.documento)}</td><td>${esc(r.cliente)}</td><td class="nw">${esc(r.codice)}</td><td>${esc(r.descrizione)}</td><td class="r">${r.qta}</td><td class="r nw">${eur(r.scarico)}</td></tr>`).join('')||'<tr><td colspan="7" class="empty">Nessuno scarico dal magazzino SRL.</td></tr>'}</tbody></table></div></div>`:''}
+    <div class="lbl" style="margin:18px 2px 8px">SCARICO PER PRODOTTO (codice negozio) · ${prods.length} prodotti</div>
+    <div class="card"><div class="tw"><table><thead><tr><th>Codice</th><th>Descrizione</th><th class="r">Q.tà</th>${mesi.filter(m=>prods.some(p=>p.m[m])).map(m=>`<th class="r">${MESI[+m.slice(5,7)-1].slice(0,3)}</th>`).join('')}<th class="r">Totale €</th></tr></thead><tbody>${prods.map(p=>`<tr><td class="nw">${esc(p.cod)}</td><td>${esc(p.des)}</td><td class="r">${p.q}</td>${mesi.filter(m=>prods.some(x=>x.m[m])).map(m=>`<td class="r nw">${p.m[m]?eur(p.m[m]):''}</td>`).join('')}<td class="r nw"><b>${eur(p.v)}</b></td></tr>`).join('')}</tbody></table></div></div>`;
+  $$('tr.clk').forEach(t=>t.onclick=e=>{if(e.target.tagName==='INPUT')return;S.scm=S.scm===t.dataset.m?'':t.dataset.m;drawScarichi()});
+  $$('input.acq').forEach(i=>i.onchange=async()=>{const v=num(i.value);try{const p={...(sc.param||{})};p.acquisti={...(p.acquisti||{})};if(isNaN(v)||!v)delete p.acquisti[i.dataset.m];else p.acquisti[i.dataset.m]=v;
+    sc.param=await api('api_saveScarichiParam',p);drawScarichi()}catch(err){toast(err.message,true)}});
+  $('#sc-csv').onclick=()=>csv([['Mese','Righe','Ricavo imponibile €','Scarico magazzino SRL €','Fornita da Paysolution (costo) €','Acquisti €','Magazzino teorico €'],...mesi.map(m=>[meseLbl(m),M[m].n,cn(M[m].ric),cn(M[m].mag),cn(M[m].pay),cn(M[m].acq),cn(M[m].fine)]),[],['Codice','Descrizione','Q.tà','Scarico €'],...prods.map(p=>[p.cod,p.des,p.q,cn(p.v)])],'Scarichi_mensili_TullioSerciSRL');
 }
 
 /* ---- Carico materiali ---- */
