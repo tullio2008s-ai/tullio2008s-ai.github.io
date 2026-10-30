@@ -1432,9 +1432,9 @@ function consCalc(){
   const acqSRL=sum(mesi,m=>M[m].ing),acqPSext=C.acquistiPS-rec,apertura=Mo.apertura,srlFine=M[mesi[mesi.length-1]].fine;
   const cons=apertura+acqSRL+acqPSext-C.stockPS-srlFine;
   const c=ricavi?cons/ricavi:null,quota=c==null?null:c*F-acqPSext,soglia=F?acqPSext/F:null;
-  const usT=sum(mesi,m=>M[m].usT),usM=sum(mesi,m=>M[m].usM),usF=sum(mesi,m=>M[m].usF),usciti=usT+usM,conc=par.concordato;
+  const usT=sum(mesi,m=>M[m].usT),usM=sum(mesi,m=>M[m].usM),usF=sum(mesi,m=>M[m].usF),usV3=sum(mesi.filter(m=>m>='2026-03'),m=>M[m].usV),usciti=usT+usM+usV3,conc=par.concordato;
   const debFis=usciti+usF-rec-mon,debCon=conc!=null?conc-rec:null;
-  return {par,C,Mo,mesi,M,V,rec,mon,recM,F,srlMag,srlPay,ricavi,acqSRL,acqPSext,apertura,srlFine,cons,c,quota,soglia,usT,usM,usF,usciti,conc,debFis,debCon};
+  return {par,C,Mo,mesi,M,V,rec,mon,recM,F,srlMag,srlPay,ricavi,acqSRL,acqPSext,apertura,srlFine,cons,c,quota,soglia,usT,usM,usF,usV3,usciti,conc,debFis,debCon};
 }
 function drawConsol(){
   const K=consCalc();
@@ -1443,7 +1443,7 @@ function drawConsol(){
   const L=(a,b,h,hi)=>`<tr${h?' style="background:#FFD500;font-weight:800"':hi?' style="background:#FFF7C2"':''}><td>${a}</td><td class="r nw">${b}</td></tr>`;
   const inp=(k,v,m)=>`<input class="cs" data-k="${k}"${m?` data-m="${m}"`:''} value="${cn(v)}" style="width:110px;text-align:right">`;
   const salvato=!!(K.par.consolidato);
-  $('#view').innerHTML=`<div class="kpis">${kp('Coefficiente dell’anno',K.c==null?'—':pctS(K.c),1,'materiali consumati ÷ ricavi')}${kp('Ricavi (IVA escl.)',eur(K.ricavi))}${kp('Materiali consumati',eur(K.cons))}${kp('Magazzino SRL non pagato (flusso fisico)',eur(K.debFis),0,K.debCon!=null?'da contratto: '+eur(K.debCon):'')}</div>
+  $('#view').innerHTML=`<div class="kpis">${kp('Coefficiente dell’anno',K.c==null?'—':pctS(K.c),1,'materiali consumati ÷ ricavi')}${kp('Ricavi (IVA escl.)',eur(K.ricavi))}${kp('Materiali consumati',eur(K.cons))}${kp('Magazzino SRL non pagato (flusso materiali)',eur(K.debFis),0,K.debCon!=null?'da contratto: '+eur(K.debCon):'')}</div>
   ${salvato?'':'<div class="note">Valori proposti dai dati forniti nella sessione di lavoro: modificane uno e vengono salvati, oppure <button class="btn sm y" id="cs-save">Salva questi valori</button>.</div>'}
   <div class="grid" style="align-items:start;grid-template-columns:repeat(auto-fit,minmax(380px,1fr))">
    <div class="card"><div class="pad" style="padding:12px 16px 2px"><b>Dati di partenza (modificabili)</b></div><div class="tw"><table><tbody>
@@ -1459,8 +1459,8 @@ function drawConsol(){
     ${L('Fatturato Paysolution × coefficiente',eur(K.c*K.F))}${L('− Acquisti diretti Paysolution','− '+eur(K.acqPSext))}${L('= Rata spettante all’SRL',eur(K.quota),0,1)}
     ${L('Coefficiente oltre il quale una rata diventa dovuta',pctS(K.soglia))}</tbody></table></div><p class="mut" style="font-size:12.5px;padding:0 16px 12px">La formula stabilisce <b>quando</b> Paysolution paga il magazzino, non se: se la rata è ≤ 0 non è dovuta ora, ma il debito resta.</p></div>
    <div class="card"><div class="pad" style="padding:12px 16px 2px"><b>Magazzino SRL non ancora pagato (31/10/2026)</b></div><div class="tw"><table><tbody>
-    ${L('Materiali passati a Paysolution (mar–ott, con montaggio)',eur(K.usciti))}${L('+ Residuo SRL venduto a costo il 31/10',eur(K.usF))}${L('− Recupero già fatturato (mar–giu)','− '+eur(K.rec))}${L('− Montaggio già fatturato','− '+eur(K.mon))}
-    ${L('= Non pagato, dal flusso fisico',eur(K.debFis),0,1)}${K.conc!=null?L('Valore dichiarato in contratto',eur(K.conc))+L('− Recupero già fatturato','− '+eur(K.rec))+L('= Non pagato, dal contratto',eur(K.debCon),0,1)+L('Differenza tra le due letture',eur(K.debCon-K.debFis)):''}</tbody></table></div></div></div>
+    ${L('Materiale uscito dal magazzino SRL dal 01/03 (mar–ott): scaricato per le vendite con la regola del 60% '+eur(K.usV3)+' + trasferito '+eur(K.usT)+' + montaggio '+eur(K.usM),eur(K.usciti))}${L('+ Residuo SRL venduto a costo il 31/10',eur(K.usF))}${L('− Recupero già fatturato (mar–giu)','− '+eur(K.rec))}${L('− Montaggio già fatturato','− '+eur(K.mon))}
+    ${L('= Non pagato, dal flusso fisico',eur(K.debFis),0,1)}${K.conc!=null?L('Valore dichiarato in contratto',eur(K.conc))+L('− Recupero già fatturato','− '+eur(K.rec))+L('= Non pagato, dal contratto',eur(K.debCon),0,1)+L('Differenza tra le due letture',eur(K.debFis-K.debCon))+'<tr><td colspan="2" class="mut" style="font-size:12.5px">La differenza è quasi tutta nei nuovi acquisti SRL dopo il 01/03 ('+eur(K.acqSRL-(K.M[K.mesi[0]].ing+K.M[K.mesi[1]].ing))+') meno il montaggio fatturato a parte ('+eur(K.mon)+').</td></tr>':''}</tbody></table></div></div></div>
   <div class="lbl" style="margin:18px 2px 8px">RICAVI E MAGAZZINO MESE PER MESE</div>
   <div class="card"><div class="tw"><table><thead><tr><th>Mese</th><th class="r">Fatturato Paysolution</th><th class="r">Gettoniere SRL (merce SRL)</th><th class="r">Gettoniere SRL (merce Paysolution)</th><th class="r">Ricavi</th><th class="r">Magazzino SRL a fine mese</th><th class="r">Recupero fatturato</th></tr></thead><tbody>
   ${mesi.map(m=>{const f=Number(C.fatturato[m])||0,v=V[m];const tot=f+v.mag+(C.escludiMerceSRL?0:v.pay);return `<tr><td><b>${meseLbl(m)}</b></td><td class="r nw">${m>='2026-03'?inp('fatt',f,m):'<span class="mut">—</span>'}</td><td class="r nw">${v.mag?eur(v.mag):'—'}</td><td class="r nw">${v.pay?eur(v.pay):'—'}</td><td class="r nw"><b>${eur(tot)}</b></td><td class="r nw">${eur(M[m].fine)}</td><td class="r nw">${K.recM[m]?eur(K.recM[m]):'—'}</td></tr>`}).join('')}</tbody>
