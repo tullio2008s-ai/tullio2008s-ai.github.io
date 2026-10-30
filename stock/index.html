@@ -777,9 +777,9 @@ window.addEventListener('beforeunload',e=>{if(S.pDirty){e.preventDefault();e.ret
 
 /* ============ STOCK / INVENTARI (indipendente dal calcolo costi) ============ */
 const SOC={PAYSOLUTION:{nome:'PAYSOLUTION Srls',tab:'invA'},TULLIO:{nome:'Tullio Serci srl',tab:'invB'}};
-const TIPI={materia:'Materia prima',semilavorato:'Semilavorato',finito:'Prodotto finito'};
-const TCH={materia:'',semilavorato:'warn',finito:'usd'};
-S.stock=null;S.prop=null;S.conta=null;S.iq='';S.itipo='';S.car=null;
+const TIPI={materia:'Materia prima',semilavorato:'Semilavorato',finito:'Prodotto finito',attrezzatura:'Attrezzatura / attivo fisso'};
+const TCH={materia:'',semilavorato:'warn',finito:'usd',attrezzatura:'up'};
+S.stock=null;S.prop=null;S.conta=null;S.iq='';S.itipo='';S.icat='';S.car=null;
 async function loadStock(force){if(S.stock&&!force)return S.stock;S.stock=await api('api_stockState');return S.stock}
 async function loadProp(){if(!S.prop)S.prop=await api('api_stockProposte');return S.prop}
 const xl=(rows,name)=>{const ws=XLSX.utils.aoa_to_sheet(rows),wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Inventario');XLSX.writeFile(wb,name)};
@@ -801,11 +801,13 @@ const fq=v=>fmt(v,0,3);
 async function rInv(soc){
   const nome=SOC[soc].nome;
   head('INVENTARIO '+nome.toUpperCase(),'Stock valorizzato · conte salvate per data · i carichi si registrano in «Carico materiali»',
-    `<button class="btn" id="i-prop">${ic('list')}Proponi codici esistenti</button> <button class="btn" id="i-new">${ic('plus')}Nuovo codice</button> <button class="btn y" id="i-conta">${ic('doc')}Nuova conta</button>`);
+    `<button class="btn" id="i-imp">${ic('up')}Importa da Excel</button> <button class="btn" id="i-prop">${ic('list')}Proponi codici esistenti</button> <button class="btn" id="i-new">${ic('plus')}Nuovo codice</button> <button class="btn y" id="i-conta">${ic('doc')}Nuova conta</button><input type="file" id="i-file" accept=".xlsx,.xls" class="hide">`);
   $('#view').innerHTML='<div class="empty"><span class="spin"></span> Caricamento stock…</div>';
   try{await loadStock()}catch(e){$('#view').innerHTML='<div class="note bad">'+esc(e.message)+'</div>';return}
   try{await ensureSnap(soc,S.idata[soc]||todayYmd())}catch(e){}
   if(S.tab!==SOC[soc].tab)return;
+  $('#i-imp').onclick=()=>$('#i-file').click();
+  $('#i-file').onchange=async e=>{const f=e.target.files[0];e.target.value='';if(!f)return;try{invImport(soc,XLSX.read(await f.arrayBuffer(),{type:'array'}),f.name)}catch(err){toast('File non leggibile: '+err.message,true)}};
   $('#i-prop').onclick=()=>pickProp(soc);$('#i-new').onclick=()=>artForm(soc,null);$('#i-conta').onclick=()=>startConta(soc,null);
   drawInv(soc);
 }
@@ -822,15 +824,16 @@ function drawInv(soc){
   const baseI=baseSnap(soc,asOf),exact=!!baseI&&baseI.data===asOf,cu=a=>exact&&G[a.id].costo!=null?G[a.id].costo:(a.costo==null?null:Number(a.costo));
   const arts=st.articoli.filter(a=>a.societa===soc&&a.attivo!=='NO');
   const tt=norm(S.iq||'').split(' ').filter(Boolean);
-  const list=arts.filter(a=>(!S.itipo||a.tipo===S.itipo)&&(!tt.length||tt.every(w=>norm(a.codice+' '+a.nome).includes(w)))).sort((x,y)=>x.codice.localeCompare(y.codice,'it',{numeric:true}));
-  const V={materia:0,semilavorato:0,finito:0};arts.forEach(a=>{V[a.tipo]+=(G[a.id].qta)*(Number(cu(a))||0)});
+  const list=arts.filter(a=>(!S.itipo||a.tipo===S.itipo)&&(!S.icat||a.categoria===S.icat)&&(!tt.length||tt.every(w=>norm(a.codice+' '+a.nome+' '+a.categoria+' '+a.sottocategoria).includes(w)))).sort((x,y)=>(x.categoria||'~').localeCompare(y.categoria||'~','it')||(x.sottocategoria||'').localeCompare(y.sottocategoria||'','it')||(x.codice||'~').localeCompare(y.codice||'~','it',{numeric:true})||(x.nome||'').localeCompare(y.nome||'','it'));
+  const V={materia:0,semilavorato:0,finito:0,attrezzatura:0},byCat={};arts.forEach(a=>{const v=(G[a.id].qta)*(Number(cu(a))||0);V[a.tipo]=(V[a.tipo]||0)+v;const k=a.categoria||'(senza categoria)';const e=byCat[k]=byCat[k]||{n:0,v:0};e.n++;e.v+=v});
+  const catCell=a=>`<td>${a.categoria?esc(a.categoria):'<span class="mut">—</span>'}${a.sottocategoria?`<div class="mut" style="font-size:11.5px">${esc(a.sottocategoria)}</div>`:''}</td>`,codCell=a=>a.codice?`<b>${esc(a.codice)}</b>`:'<span class="mut">senza codice</span>';
   const last=st.righeUltime[soc],invs=st.inventari.filter(i=>i.societa===soc);
   const kp=(l,v,y)=>`<div class="kpi card"><small>${l}</small><b ${y?'style="background:#FFD500;color:#0A0A0A;padding:0 6px;border-radius:6px"':''}>${v}</b></div>`;
   const row=a=>{const g=G[a.id];
-    if(cn_)return `<tr data-id="${a.id}"><td class="nw"><b>${esc(a.codice)}</b></td><td>${esc(a.nome)}</td><td><span class="chip ${TCH[a.tipo]}">${TIPI[a.tipo]}</span></td><td>${esc(a.um)}</td><td class="r nw mut">${fq(g.qta)}</td>
+    if(cn_)return `<tr data-id="${a.id}"><td class="nw">${codCell(a)}</td><td>${esc(a.nome)}</td>${catCell(a)}<td><span class="chip ${TCH[a.tipo]}">${TIPI[a.tipo]}</span></td><td>${esc(a.um)}</td><td class="r nw mut">${fq(g.qta)}</td>
       <td class="r"><input class="cq" data-id="${a.id}" value="${esc(cn_.q[a.id])}" style="width:84px;text-align:right"></td><td class="r nw" id="cd${a.id}"></td>
       <td class="r"><input class="cc" data-id="${a.id}" value="${esc(cn_.c[a.id])}" style="width:84px;text-align:right"></td><td class="r nw" id="cv${a.id}"></td></tr>`;
-    return `<tr class="click" data-id="${a.id}"><td class="nw"><b>${esc(a.codice)}</b></td><td>${esc(a.nome)||'<span class="mut">—</span>'}</td><td><span class="chip ${TCH[a.tipo]}">${TIPI[a.tipo]}</span></td><td>${esc(a.um)}</td>
+    return `<tr class="click" data-id="${a.id}"><td class="nw">${codCell(a)}</td><td>${esc(a.nome)||'<span class="mut">—</span>'}</td>${catCell(a)}<td><span class="chip ${TCH[a.tipo]}">${TIPI[a.tipo]}</span></td><td>${esc(a.um)}</td>
       <td class="r nw">${cu(a)==null?'<span class="chip warn">da valorizzare</span>':eurP(cu(a))}</td><td class="r nw"><b>${fq(g.qta)}</b></td><td class="r nw">${cu(a)==null?'—':eur(g.qta*cu(a))}</td><td class="nw">${g.ult?dmy(g.ult):'<span class="mut">—</span>'}</td></tr>`};
   const nMov=baseI?st.movimenti.filter(x=>x.societa===soc&&x.data>baseI.data&&x.data<=asOf).length:st.movimenti.filter(x=>x.societa===soc&&x.data<=asOf).length;
   const baseNome=baseI&&baseI.nome?' («'+esc(baseI.nome)+'»)':'';
@@ -842,14 +845,16 @@ function drawInv(soc){
     <div class="mut" style="flex:1;min-width:240px">${spiega}${asOf!==todayYmd()?` <a href="#" id="i-oggi">Torna a oggi</a>`:''}</div>
     ${invs.length?`<label class="f" style="margin:0">Salvati: vai alla data<select id="i-dsel"><option value="">— scegli —</option>${invs.map(i=>`<option value="${i.data}" ${i.data===asOf?'selected':''}>${dmy(i.data)} · ${esc(i.nome||'')}</option>`).join('')}</select></label>`:''}</div>`;
   $('#view').innerHTML=`${dRef}
-  <div class="kpis">${kp('Articoli',arts.length)}${kp('Materie prime',eur(V.materia))}${kp('Semilavorati',eur(V.semilavorato))}${kp('Prodotti finiti',eur(V.finito))}${kp('VALORE STOCK',eur(V.materia+V.semilavorato+V.finito),1)}${kp('Ultima conta',last?dmy(last.data):'—')}</div>
+  <div class="kpis">${kp('Articoli',arts.length)}${kp('Materie prime',eur(V.materia))}${kp('Semilavorati',eur(V.semilavorato))}${kp('Prodotti finiti',eur(V.finito))}${kp('Attrezzature',eur(V.attrezzatura))}${kp('VALORE STOCK',eur(V.materia+V.semilavorato+V.finito+V.attrezzatura),1)}${kp('Ultima conta',last?dmy(last.data):'—')}</div>
   ${cn_?`<div class="note" style="display:flex;gap:12px;flex-wrap:wrap;align-items:center"><b>CONTA IN CORSO</b><label class="f" style="margin:0">Data inventario<input type="date" id="c-dat" value="${esc(cn_.data)}"></label><label class="f" style="margin:0;flex:1;min-width:180px">Nome<input id="c-nom" value="${esc(cn_.nome)}"></label>
     <span class="mut" style="flex-basis:100%">Le quantità sono precompilate con la giacenza teorica (ultima conta + carichi): correggile con il conteggio reale e ritocca i costi se serve. Alla conferma la conta viene salvata con la data e diventa la nuova base.</span>
     <button class="btn p" id="c-save">Salva inventario al ${dmy(cn_.data)}</button><button class="btn" id="c-cancel">Annulla conta</button></div>`:''}
-  <div class="tools"><div class="search">${ic('search')}<input id="i-q" placeholder="Cerca codice o descrizione…" value="${esc(S.iq)}"></div>
+  ${!cn_&&arts.length?`<div class="card tw" style="margin-bottom:12px"><table><thead><tr><th>Categoria</th><th class="r">Articoli</th><th class="r">Valore €</th></tr></thead><tbody>${Object.entries(byCat).sort((a,b)=>a[0].localeCompare(b[0],'it')).map(([k,e])=>`<tr class="catrow" data-cat="${esc(k)}" style="cursor:pointer;${S.icat===k?'background:var(--brand-soft)':''}"><td><b>${esc(k)}</b></td><td class="r">${e.n}</td><td class="r nw">${eur(e.v)}</td></tr>`).join('')}</tbody><tfoot><tr><td class="r"><b>TOTALE</b></td><td class="r"><b>${arts.length}</b></td><td class="r nw"><span class="land">${eur(Object.values(byCat).reduce((s,e)=>s+e.v,0))}</span></td></tr></tfoot></table></div>`:''}
+  <div class="tools"><div class="search">${ic('search')}<input id="i-q" placeholder="Cerca codice, descrizione o categoria…" value="${esc(S.iq)}"></div>
+    <select id="i-c"><option value="">Tutte le categorie</option>${[...new Set([...CAT_DEF,...arts.map(a=>a.categoria).filter(Boolean)])].sort((a,b)=>a.localeCompare(b,'it')).map(k=>`<option ${S.icat===k?'selected':''}>${esc(k)}</option>`).join('')}</select>
     <select id="i-t"><option value="">Tutti i tipi</option>${Object.entries(TIPI).map(([k,v])=>`<option value="${k}" ${S.itipo===k?'selected':''}>${v}</option>`).join('')}</select>
     <button class="btn" id="i-csv">${ic('dl')}CSV</button><button class="btn" id="i-xls">${ic('dl')}Excel</button></div>
-  <div class="card tw">${list.length?`<table><thead><tr><th>Codice</th><th>Descrizione</th><th>Tipo</th><th>U.M.</th>${cn_?'<th class="r">Teorica</th><th class="r">Conta</th><th class="r">Diff.</th><th class="r">Costo €</th><th class="r">Valore €</th>':'<th class="r">Costo unit. €</th><th class="r">Giacenza</th><th class="r">Valore €</th><th>Ult. mov.</th>'}</tr></thead><tbody>${list.map(row).join('')}</tbody>${cn_?'<tfoot><tr><td colspan="8" class="r"><b>TOTALE CONTA</b></td><td class="r nw" id="c-tot"></td></tr></tfoot>':''}</table>`
+  <div class="card tw">${list.length?`<table><thead><tr><th>Codice</th><th>Descrizione</th><th>Categoria</th><th>Tipo</th><th>U.M.</th>${cn_?'<th class="r">Teorica</th><th class="r">Conta</th><th class="r">Diff.</th><th class="r">Costo €</th><th class="r">Valore €</th>':'<th class="r">Costo unit. €</th><th class="r">Giacenza</th><th class="r">Valore €</th><th>Ult. mov.</th>'}</tr></thead><tbody>${list.map(row).join('')}</tbody>${cn_?'<tfoot><tr><td colspan="9" class="r"><b>TOTALE CONTA</b></td><td class="r nw" id="c-tot"></td></tr></tfoot>':''}</table>`
     :`<div class="empty">${arts.length?'Nessun articolo corrisponde alla ricerca.':'Inventario vuoto: usa «Proponi codici esistenti» per partire dai codici del listino e delle distinte, oppure «Nuovo codice».'}</div>`}</div>
   <div class="sec"><span>Inventari salvati per data</span></div>
   <div class="card tw">${invs.length?`<table><thead><tr><th>Data</th><th>Nome</th><th class="r">Articoli</th><th class="r">Valore stock</th><th>File</th><th></th></tr></thead><tbody>${invs.map(i=>`<tr><td class="nw"><b>${dmy(i.data)}</b></td><td>${esc(i.nome)}</td><td class="r">${i.nRighe}</td><td class="r nw"><span class="land">${eur(i.valore)}</span></td><td>${i.fileUrl?`<a href="${esc(i.fileUrl)}" target="_blank" rel="noopener">CSV su Drive</a>`:'<span class="mut">—</span>'}</td>
@@ -861,8 +866,10 @@ function drawInv(soc){
   const og=$('#i-oggi');if(og)og.onclick=e=>{e.preventDefault();goDate(todayYmd())};
   $('#i-q').oninput=e=>{S.iq=e.target.value;drawInv(soc);const i=$('#i-q');i.focus();i.setSelectionRange(i.value.length,i.value.length)};
   $('#i-t').onchange=e=>{S.itipo=e.target.value;drawInv(soc)};
-  const exp=()=>[['Codice','Descrizione','Tipo','U.M.','Costo unit. €','Giacenza','Valore €'],...list.map(a=>[a.codice,a.nome,TIPI[a.tipo],a.um,cu(a)==null?'':cu(a),G[a.id].qta,cu(a)==null?'':Math.round(G[a.id].qta*cu(a)*100)/100])];
-  $('#i-csv').onclick=()=>csv(exp().map((r,i)=>i?r.map((v,j)=>j>=4&&v!==''?cn(v):v):r),'stock_'+soc+'_'+asOf+'.csv');
+  $('#i-c').onchange=e=>{S.icat=e.target.value;drawInv(soc)};
+  $$('#view tr.catrow').forEach(r=>r.onclick=()=>{S.icat=S.icat===r.dataset.cat?'':r.dataset.cat;drawInv(soc)});
+  const exp=()=>[['Categoria','Sottocategoria','Codice','Descrizione','Tipo','U.M.','Costo unit. €','Giacenza','Valore €'],...list.map(a=>[a.categoria,a.sottocategoria,a.codice,a.nome,TIPI[a.tipo],a.um,cu(a)==null?'':cu(a),G[a.id].qta,cu(a)==null?'':Math.round(G[a.id].qta*cu(a)*100)/100])];
+  $('#i-csv').onclick=()=>csv(exp().map((r,i)=>i?r.map((v,j)=>j>=6&&v!==''?cn(v):v):r),'stock_'+soc+'_'+asOf+'.csv');
   $('#i-xls').onclick=()=>xl(exp(),'Stock '+SOC[soc].nome+' '+asOf+'.xlsx');
   if(!cn_){$$('#view tr.click').forEach(r=>r.onclick=()=>artForm(soc,st.articoli.find(a=>a.id===r.dataset.id)))}
   $$('#view [data-op]').forEach(b=>b.onclick=()=>openInv(soc,b.dataset.op));
@@ -898,9 +905,12 @@ async function openInv(soc,id){
 function artForm(soc,a){
   const n=!a;a=a||{tipo:'materia',um:'pz'};
   const w=modal(`<div class="mh"><h3>${n?'Nuovo codice':'Modifica codice'} · ${esc(SOC[soc].nome)}</h3><button class="x">${ic('x')}</button></div><div class="mb"><div class="grid">
-    <label class="f">Codice<input id="a-cod" value="${esc(a.codice||'')}"></label>
+    <label class="f">Codice (facoltativo)<input id="a-cod" value="${esc(a.codice||'')}" placeholder="da assegnare in seguito"></label>
     <label class="f">Tipo<select id="a-tip">${Object.entries(TIPI).map(([k,v])=>`<option value="${k}" ${a.tipo===k?'selected':''}>${v}</option>`).join('')}</select></label>
     <label class="f" style="grid-column:1/-1">Descrizione<input id="a-nom" value="${esc(a.nome||'')}"></label>
+    <label class="f">Categoria<input id="a-cat" list="a-cats" value="${esc(a.categoria||'')}" placeholder="scegli o scrivi una nuova"></label>
+    <label class="f">Sottocategoria<input id="a-sub" list="a-subs" value="${esc(a.sottocategoria||'')}"></label>
+    <datalist id="a-cats">${catList(soc).map(k=>`<option value="${esc(k)}">`).join('')}</datalist><datalist id="a-subs">${subList(soc,a.categoria||'').map(k=>`<option value="${esc(k)}">`).join('')}</datalist>
     <label class="f">Unità di misura<input id="a-um" value="${esc(a.um||'pz')}"></label>
     <label class="f">Costo unitario € (valorizzazione)<input id="a-cos" value="${a.costo==null?'':esc(String(a.costo).replace('.',','))}"></label>
     <label class="f" style="grid-column:1/-1">Note<input id="a-note" value="${esc(a.note||'')}"></label></div>
@@ -911,7 +921,7 @@ function artForm(soc,a){
       const m=p.prodotti.find(x=>x.codice.toLowerCase()===c)||p.componenti.find(x=>x.codice.toLowerCase()===c);const s=$('#a-sug',w);
       if(m&&m.costo!=null){s.style.display='block';s.innerHTML=`Nel listino/distinte questo codice vale <b>${eurP(m.costo)}</b>. <button class="btn sm y" id="a-use">Usa questo costo</button>`;$('#a-use',w).onclick=()=>{$('#a-cos',w).value=String(m.costo).replace('.',',');if(!$('#a-nom',w).value)$('#a-nom',w).value=m.nome||''}}else s.style.display='none'};
     $('#a-cod',w).oninput=upd;upd()}).catch(()=>{});
-  $('#a-ok',w).onclick=e=>busy(e.currentTarget,async()=>{await api('api_saveArticolo',{id:a.id,societa:soc,codice:$('#a-cod',w).value,nome:$('#a-nom',w).value,tipo:$('#a-tip',w).value,um:$('#a-um',w).value,costo:$('#a-cos',w).value.trim()===''?null:num($('#a-cos',w).value),note:$('#a-note',w).value,origine:a.origine||'manuale'});
+  $('#a-ok',w).onclick=e=>busy(e.currentTarget,async()=>{await api('api_saveArticolo',{id:a.id,societa:soc,codice:$('#a-cod',w).value,nome:$('#a-nom',w).value,tipo:$('#a-tip',w).value,categoria:$('#a-cat',w).value,sottocategoria:$('#a-sub',w).value,um:$('#a-um',w).value,costo:$('#a-cos',w).value.trim()===''?null:num($('#a-cos',w).value),note:$('#a-note',w).value,origine:a.origine||'manuale'});
     w.remove();await loadStock(true);if(SOC[soc].tab===S.tab)drawInv(soc);toast('Codice salvato.')});
   const d=$('#a-del',w);if(d)d.onclick=e=>{if(!confirm('Eliminare il codice '+a.codice+'? Se ha movimenti o conte verrà solo archiviato.'))return;busy(e.currentTarget,async()=>{const r=await api('api_deleteArticolo',a.id);w.remove();await loadStock(true);drawInv(soc);toast(r.archiviato?'Codice archiviato (ha movimenti).':'Codice eliminato.')})};
 }
@@ -934,6 +944,90 @@ async function pickProp(soc){
   $('#p-ok',w).onclick=e=>busy(e.currentTarget,async()=>{if(!sel.size)throw new Error('Seleziona almeno un codice.');const r=await api('api_importaArticoli',soc,[...sel.values()]);w.remove();await loadStock(true);drawInv(soc);toast(r.creati+' codici aggiunti'+(r.saltati?' ('+r.saltati+' già presenti)':'')+'.')});
 }
 
+/* ---- Import inventario da Excel (più pagine, categorie e sottocategorie) ---- */
+const CAT_DEF=['COMPONENTI PER LA FABBRICAZIONE','PRODOTTI FINITI DA VENDERE','IMBALLAGGI','ATTREZZI E UTENSILI DA LAVORO','ATTREZZATURE UFFICIO','AMAZON','CINESI','BRICOMAN','ALTRI','ALESSANDRA PROIETTI'];
+const catList=soc=>[...new Set([...CAT_DEF,...(S.stock?S.stock.articoli.filter(a=>a.societa===soc).map(a=>a.categoria).filter(Boolean):[])])].sort((a,b)=>a.localeCompare(b,'it'));
+const subList=(soc,cat)=>[...new Set(S.stock.articoli.filter(a=>a.societa===soc&&(!cat||a.categoria===cat)).map(a=>a.sottocategoria).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'it'));
+const tipoFrom=cat=>/FINIT/i.test(cat)?'finito':/ATTREZZ/i.test(cat)?'attrezzatura':'materia';
+function parseInvWb(wb){
+  const T=v=>String(v==null?'':v).trim(),out={sheets:[],data:'',totale:null,ignorati:[]};
+  const sup=[],dmatch=s=>{const m=String(s).match(/(?:INVENTARIO|MAGAZZINO|SITUAZIONE)(?:\s+MAGAZZINO)?\s+AL\s*(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})/i);return m?m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0'):''};
+  wb.SheetNames.forEach(n=>{
+    const aoa=XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,defval:'',raw:true});
+    if(/^(sommario|riassunto)/i.test(n)){aoa.forEach(r=>{r.forEach(c=>{if(typeof c==='string'&&!out.data)out.data=dmatch(c)});const lbl=r.map(T).join(' ').toUpperCase();if(/TOTALE\s*A\s*\+\s*B/.test(lbl)){const v=r.find(c=>typeof c==='number');if(v!=null)out.totale=v}else if(/^riassunto/i.test(n)&&!lbl.replace(/[\d.,\s]/g,'')&&r.some(c=>typeof c==='number'))out.totale=r.find(c=>typeof c==='number')});return}
+    const hs=aoa.findIndex(r=>r.some(c=>/^fornitore$/i.test(T(c)))&&r.some(c=>/^componente$/i.test(T(c))));
+    if(hs>=0){sup.push({n,aoa,hs});return}
+    const hi=aoa.findIndex(r=>r.some(c=>/^nome$/i.test(T(c)))&&r.some(c=>/^quantit/i.test(T(c))));
+    if(hi<0||/^(tutti i materiali|rubrica)/i.test(n)){out.ignorati.push(n);return}
+    const H=aoa[hi].map(c=>T(c).toUpperCase()),ix=k=>H.findIndex(h=>h.startsWith(k));
+    const C={cod:ix('COD'),cat:ix('CATEGORIA'),sub:ix('SOTTO'),nome:ix('NOME'),et:ix('ETICHETTA'),note:ix('NOTE'),q:ix('QUANTIT'),u:ix('VALORE UNIT'),t:ix('VALORE COMPL')};
+    let dsheet='';aoa.slice(0,hi).forEach(r=>r.forEach(c=>{if(typeof c==='string'&&!dsheet)dsheet=dmatch(c)}));
+    const items=[];
+    for(let k=hi+1;k<aoa.length;k++){const r=aoa[k],nome=T(r[C.nome]);if(!nome)continue;
+      const get=i=>i<0?'':r[i],nn=[];let qRaw=get(C.q),q=typeof qRaw==='number'?qRaw:num(qRaw);
+      if(isNaN(q)||q<0){nn.push('q.tà nel file «'+T(qRaw)+'»');q=1}
+      const uR=get(C.u),tR=get(C.t),u=typeof uR==='number'?uR:num(uR),t=typeof tR==='number'?tR:num(tR);let costo=isNaN(u)?0:u;
+      if(!isNaN(t)&&(isNaN(u)||Math.abs(q*u-t)>0.02)){costo=q>0?t/q:0;if(!isNaN(u)&&Math.abs(q*u-t)>0.02)nn.push('valore unitario nel file '+fmt(u)+' ≠ totale '+fmt(t)+': usato il totale')}
+      const cat=T(get(C.cat))||'SENZA CATEGORIA';
+      items.push({sheet:n,cod:T(get(C.cod)),categoria:cat,sottocategoria:T(get(C.sub)),nome,q,costo:Math.round(costo*10000)/10000,tipo:tipoFrom(cat),
+        note:[T(get(C.et)),T(get(C.note)),...nn].filter(Boolean).join(' · '),anom:nn.length?nn.join('; '):''})}
+    out.sheets.push({nome:n,data:dsheet,items,inc:true});
+  });
+  if(sup.length){const dash=sup.find(x=>/^dashboard/i.test(x.n)),norm2=x=>String(x).trim().toUpperCase().replace(/\s+/g,' ');
+    const rd=x=>{const H=x.aoa[x.hs].map(c=>T(c).toUpperCase()),ix=k=>H.findIndex(h=>h.startsWith(k)),C={f:ix('FORNITORE'),n:ix('COMPONENTE'),q:ix('MAGAZZINO'),u:ix('COSTO UNIT'),t:ix('COSTO TOT')},rows=[];
+      for(let k=x.hs+1;k<x.aoa.length;k++){const r=x.aoa[k],nome=T(r[C.n]);if(!nome)continue;rows.push({f:T(r[C.f]),nome,q:r[C.q],u:r[C.u],t:r[C.t]})}return rows};
+    const mk=(r,cat,sheet)=>{const nn=[];let q=typeof r.q==='number'?r.q:num(r.q),u=typeof r.u==='number'?r.u:num(r.u),t=typeof r.t==='number'?r.t:num(r.t);
+      if(isNaN(q)||q<0){nn.push('q.tà nel file «'+T(r.q)+'»');q=1}let costo=isNaN(u)?0:u;
+      if(!isNaN(t)&&(isNaN(u)||Math.abs(q*u-t)>0.02)){costo=q>0?t/q:0;if(!isNaN(u)&&Math.abs(q*u-t)>0.02)nn.push('costo unitario nel file '+fmt(u)+' ≠ totale '+fmt(t)+': usato il totale')}
+      return {sheet,cod:'',categoria:cat,sottocategoria:r.f,nome:r.nome,q,costo:Math.round(costo*10000)/10000,tipo:'materia',note:nn.join(' · '),anom:nn.join('; ')}};
+    if(dash){const map={};sup.filter(x=>x!==dash).forEach(x=>rd(x).forEach(r=>{map[norm2(r.nome)+'|'+Math.round((num(r.t)||0)*100)]=x.n}));
+      const fs=new Set(sup.filter(x=>x!==dash).map(x=>norm2(x.n)));
+      out.sheets.push({nome:dash.n+' (componenti, '+(sup.length-1)+' pagine fornitore già incluse)',data:'',inc:true,items:rd(dash).map(r=>mk(r,map[norm2(r.nome)+'|'+Math.round((num(r.t)||0)*100)]||(fs.has(norm2(r.f))?norm2(r.f):'ALTRI'),dash.n))});
+      sup.filter(x=>x!==dash).forEach(x=>out.ignorati.push(x.n+' (duplicata in '+dash.n+')'))}
+    else sup.forEach(x=>out.sheets.push({nome:x.n,data:'',inc:true,items:rd(x).map(r=>mk(r,norm2(x.n),x.n))}))}
+  return out;
+}
+const sheetVal=s=>s.items.reduce((x,i)=>x+i.q*i.costo,0);
+function invImport(soc,wb,fname){
+  const P=parseInvWb(wb);
+  if(!P.sheets.length){toast('Nessuna pagina di inventario riconosciuta (servono colonne NOME e QUANTITÀ).',true);return}
+  const w=modal(`<div class="mh"><h3>Importa inventario · ${esc(SOC[soc].nome)}</h3><button class="x">${ic('x')}</button></div><div class="mb"></div><div class="mf"><button class="btn x">Annulla</button><button class="btn p" id="im-ok">Importa e salva inventario</button></div>`,'m');closeX(w);
+  const draw=()=>{const sel=P.sheets.filter(s=>s.inc),tot=sel.reduce((x,s)=>x+sheetVal(s),0),n=sel.reduce((x,s)=>x+s.items.length,0);
+    const an=sel.flatMap(s=>s.items.filter(i=>i.anom).map(i=>'<b>'+esc(i.nome)+'</b> ('+esc(s.nome)+'): '+esc(i.anom)));
+    const ok=P.totale!=null&&Math.abs(tot-P.totale)<0.05;
+    $('.mb',w).innerHTML=`<div class="note ok" style="margin-top:0">File: <b>${esc(fname)}</b> · ${P.sheets.length} pagine di inventario${P.ignorati.length?` · ignorate: ${P.ignorati.map(esc).join(', ')}`:''}</div>
+      <div class="grid" style="margin-bottom:12px"><label class="f">Data inventario<input type="date" id="im-dat" value="${esc(P.dataSel||P.data)}"></label><label class="f">Nome<input id="im-nom" value="${esc(P.nome||'Inventario ufficiale '+(P.data?dmy(P.data):''))}"></label></div>
+      ${P.data?`<div class="note" style="margin-top:0">Il file indica come data <b>${dmy(P.data)}</b>: controlla che sia quella giusta prima di importare.</div>`:''}
+      <div class="tw"><table><thead><tr><th style="width:30px">✓</th><th>Pagina</th><th class="r">Articoli</th><th class="r">Valore €</th></tr></thead><tbody>${P.sheets.map((s,i)=>`<tr><td><input type="checkbox" data-s="${i}" ${s.inc?'checked':''}></td><td><b>${esc(s.nome)}</b>${s.data&&s.data!==P.data?`<div class="mut" style="font-size:12px">titolo: inventario al ${dmy(s.data)}</div>`:''}</td><td class="r">${s.items.length}</td><td class="r nw">${eur(sheetVal(s))}</td></tr>`).join('')}</tbody><tfoot><tr><td></td><td class="r"><b>TOTALE</b></td><td class="r"><b>${n}</b></td><td class="r nw"><span class="land">${eur(tot)}</span></td></tr></tfoot></table></div>
+      ${P.totale!=null?`<div class="note ${ok?'ok':''}" style="margin-top:12px">${ok?'✓ Il totale coincide con il «TOTALE a+b» del SOMMARIO ('+eur(P.totale)+').':'Il totale del SOMMARIO è '+eur(P.totale)+': differenza '+eur(tot-P.totale)+'.'}</div>`:''}
+      ${an.length?`<div class="note" style="margin-top:12px"><b>Da controllare (${an.length}):</b><br>${an.join('<br>')}</div>`:''}
+      <p class="mut" style="font-size:13px;margin:12px 0 0">Verranno creati gli articoli con categoria e sottocategoria del file. I codici: usati quelli del file se univoci, altrimenti il codice proposto dal listino o dalle distinte (se il nome coincide); gli altri restano senza codice, da assegnare poi.</p>`;
+    $$('[data-s]',w).forEach(c=>c.onchange=()=>{P.dataSel=$('#im-dat',w).value;P.nome=$('#im-nom',w).value;P.sheets[+c.dataset.s].inc=c.checked;draw()});};
+  draw();
+  $('#im-ok',w).onclick=e=>busy(e.currentTarget,async()=>{
+    P.dataSel=$('#im-dat',w).value;P.nome=$('#im-nom',w).value;const data=P.dataSel;if(!data)throw new Error('Indica la data dell’inventario.');
+    const items=P.sheets.filter(s=>s.inc).flatMap(s=>s.items.map(i=>({...i})));if(!items.length)throw new Error('Seleziona almeno una pagina.');
+    await loadStock(true);const Pr=await loadProp().catch(()=>({componenti:[],prodotti:[]}));
+    const nm={};[...Pr.componenti.map(x=>[x.codice,x.nome]),...Pr.prodotti.map(x=>[x.codice,x.nome])].forEach(([c,n])=>{if(c&&n&&!nm[norm(n)])nm[norm(n)]=c});
+    const exist=S.stock.articoli.filter(a=>a.societa===soc&&a.attivo!=='NO'),used=new Map();exist.forEach(a=>{if(a.codice)used.set(a.codice.toLowerCase(),norm(a.nome))});
+    const cnt={};items.forEach(i=>{if(i.cod)cnt[i.cod]=(cnt[i.cod]||0)+1});
+    const keys={};
+    items.forEach(i=>{let c=i.cod;
+      if(c&&cnt[c]>1){i.note=[i.note,'cod. file '+c+' (condiviso da più articoli)'].filter(Boolean).join(' · ');c=''}
+      if(!c&&nm[norm(i.nome)])c=nm[norm(i.nome)];
+      if(c&&used.has(c.toLowerCase())&&used.get(c.toLowerCase())!==norm(i.nome))c='';
+      if(c)used.set(c.toLowerCase(),norm(i.nome));i.codice=c;
+      const k=norm(i.nome)+'|'+norm(i.categoria)+'|'+norm(i.sottocategoria);keys[k]=(keys[k]||0)+1;if(keys[k]>1)i.nome=i.nome+' ('+keys[k]+')'});
+    const cr=await api('api_importaArticoli',soc,items.map(i=>({codice:i.codice,nome:i.nome,tipo:i.tipo,um:'pz',costo:i.costo,categoria:i.categoria,sottocategoria:i.sottocategoria,note:i.note,origine:'inventario'})));
+    await loadStock(true);
+    const arts=S.stock.articoli.filter(a=>a.societa===soc&&a.attivo!=='NO'),byC={},byK={};arts.forEach(a=>{if(a.codice)byC[a.codice.toLowerCase()]=a;byK[norm(a.nome)+'|'+norm(a.categoria)+'|'+norm(a.sottocategoria)]=a});
+    const righe=[];const mancanti=[];items.forEach(i=>{const a=i.codice?byC[i.codice.toLowerCase()]:byK[norm(i.nome)+'|'+norm(i.categoria)+'|'+norm(i.sottocategoria)];if(a)righe.push({articoloId:a.id,qta:i.q,costo:i.costo});else mancanti.push(i.nome)});
+    if(mancanti.length)throw new Error('Articoli non abbinati: '+mancanti.slice(0,5).join(', '));
+    let r;try{r=await api('api_saveInventario',soc,data,P.nome,'Importato da '+fname,righe,false)}catch(err){if(/^ESISTE/.test(err.message)&&confirm(err.message.replace('ESISTE: ','')+'\n\nSostituirlo con questo?'))r=await api('api_saveInventario',soc,data,P.nome,'Importato da '+fname,righe,true);else throw err}
+    w.remove();S.idata[soc]=data;await loadStock(true);try{await ensureSnap(soc,data)}catch(x){}if(S.tab===SOC[soc].tab)drawInv(soc);
+    toast('Inventario importato: '+cr.creati+' articoli creati'+(cr.saltati?' ('+cr.saltati+' già presenti)':'')+', '+r.nRighe+' righe, valore '+eur(r.valore)+'.')});
+}
+
 /* ---- Carico materiali ---- */
 const newCar=()=>({soc:'PAYSOLUTION',data:todayYmd(),rif:'',media:true,righe:[blankCar()]});
 const blankCar=()=>({codice:'',nome:'',um:'pz',qta:'',costo:'',tipo:'materia',rif:'',mov:'carico'});
@@ -950,7 +1044,7 @@ function drawCarico(){
    <div class="calc"><label class="f">Inventario di destinazione<select id="k-soc">${Object.entries(SOC).map(([k,v])=>`<option value="${k}" ${c.soc===k?'selected':''}>${esc(v.nome)}</option>`).join('')}</select></label>
     <label class="f">Data carico<input type="date" id="k-dat" value="${esc(c.data)}"></label><label class="f">Riferimento (fattura / DDT)<input id="k-rif" value="${esc(c.rif)}" placeholder="es. FT 123 del 20/10"></label>
     <label class="f" style="align-self:end"><span style="display:flex;gap:8px;align-items:center;font-weight:600"><input type="checkbox" id="k-med" ${c.media?'checked':''}> Aggiorna costo medio</span></label></div>
-   <datalist id="k-dl">${arts.map(a=>`<option value="${esc(a.codice)}">${esc(a.nome)}</option>`).join('')}${S.prop?S.prop.componenti.filter(x=>x.codice).slice(0,400).map(x=>`<option value="${esc(x.codice)}">${esc(x.nome)}</option>`).join(''):''}</datalist>
+   <datalist id="k-dl">${arts.filter(a=>a.codice).map(a=>`<option value="${esc(a.codice)}">${esc(a.nome)}</option>`).join('')}${S.prop?S.prop.componenti.filter(x=>x.codice).slice(0,400).map(x=>`<option value="${esc(x.codice)}">${esc(x.nome)}</option>`).join(''):''}</datalist>
    <div class="tw" style="margin-top:12px"><table class="rt"><thead><tr><th style="width:150px">Codice</th><th>Descrizione</th><th style="width:70px">U.M.</th><th style="width:110px">Quantità</th><th style="width:120px">Costo unit. €</th><th class="r" style="width:100px">Valore €</th><th style="width:30px"></th></tr></thead><tbody id="k-rows"></tbody></table></div>
    <div class="tools" style="margin:12px 0 0"><button class="btn sm" id="k-add">${ic('plus')}Aggiungi riga</button><button class="btn sm y" id="k-fat">${ic('doc')}Carica da fattura già inserita…</button><span class="mut" id="k-tot" style="margin-left:auto;font-weight:700"></span></div>
    <div class="tools" style="margin:16px 0 0"><button class="btn p" id="k-save">Carica a stock</button><button class="btn" id="k-reset">Svuota</button></div></div>
